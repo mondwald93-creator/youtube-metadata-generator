@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>유튜브 메타데이터 생성기</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f0f;
+      color: #e0e0e0;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1a1a1a;
+      border-bottom: 1px solid #2a2a2a;
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    header h1 { font-size: 18px; font-weight: 600; color: #fff; }
+    header .subtitle { font-size: 13px; color: #888; flex: 1; }
+
+    .settings-btn {
+      padding: 7px 14px;
+      background: none;
+      border: 1px solid #333;
+      border-radius: 6px;
+      color: #888;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .settings-btn:hover { color: #ccc; border-color: #555; }
+    .settings-btn.active { color: #fff; border-color: #666; background: #2a2a2a; }
+
+    /* API 키 설정 패널 */
+    .api-panel {
+      display: none;
+      background: #141414;
+      border-bottom: 1px solid #2a2a2a;
+      padding: 20px 32px;
+    }
+    .api-panel.open { display: block; }
+
+    .api-panel-inner {
+      max-width: 860px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .api-panel label { font-size: 13px; color: #888; white-space: nowrap; }
+
+    .api-input {
+      flex: 1;
+      padding: 9px 14px;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      color: #e0e0e0;
+      font-size: 13px;
+      font-family: monospace;
+      outline: none;
+    }
+    .api-input:focus { border-color: #444; }
+
+    .api-save-btn {
+      padding: 9px 18px;
+      background: #2a2a2a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      color: #ccc;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .api-save-btn:hover { background: #333; color: #fff; }
+    .api-save-btn.saved { background: #1a3a1a; border-color: #2a6a2a; color: #6adf6a; }
+
+    .api-status {
+      font-size: 12px;
+      color: #6adf6a;
+      white-space: nowrap;
+    }
+
+    .container {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 40px 24px;
+    }
+
+    .section-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #888;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    /* 채널 선택 */
+    .channel-selector { display: flex; gap: 12px; margin-bottom: 40px; }
+
+    .channel-btn {
+      flex: 1;
+      padding: 20px;
+      border-radius: 12px;
+      border: 2px solid #2a2a2a;
+      background: #1a1a1a;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.15s;
+    }
+    .channel-btn:hover { border-color: #444; }
+    .channel-btn.active { border-color: #ff4444; background: #1f1414; }
+    .channel-btn.active.jeekim { border-color: #4488ff; background: #14181f; }
+
+    .ch-name { font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+    .ch-desc { font-size: 13px; color: #777; }
+    .ch-badge {
+      display: inline-block;
+      margin-top: 10px;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 20px;
+      background: #2a2a2a;
+      color: #aaa;
+    }
+    .channel-btn.active .ch-badge { background: #ff444422; color: #ff8888; }
+    .channel-btn.active.jeekim .ch-badge { background: #4488ff22; color: #88aaff; }
+
+    /* 탭 */
+    .input-tabs {
+      display: flex;
+      border-bottom: 1px solid #2a2a2a;
+      margin-bottom: 20px;
+    }
+
+    .tab-btn {
+      padding: 10px 20px;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #777;
+      font-size: 14px;
+      cursor: pointer;
+      margin-bottom: -1px;
+      transition: all 0.15s;
+    }
+    .tab-btn.active { color: #fff; border-bottom-color: #ff4444; }
+
+    /* 업로드 */
+    .upload-area {
+      border: 2px dashed #2a2a2a;
+      border-radius: 12px;
+      padding: 48px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-bottom: 16px;
+      display: block;
+    }
+    .upload-area:hover { border-color: #444; background: #1a1a1a; }
+    .upload-area.has-file { border-color: #444; border-style: solid; background: #1a1a1a; }
+
+    .upload-icon { font-size: 36px; margin-bottom: 12px; }
+    .upload-area h3 { font-size: 15px; color: #ccc; margin-bottom: 6px; }
+    .upload-area p { font-size: 13px; color: #666; }
+    .upload-area input[type="file"] { display: none; }
+
+    .file-info {
+      display: none;
+      padding: 12px 16px;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      color: #aaa;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .file-info .file-name { color: #fff; flex: 1; }
+    .file-info .file-size { color: #666; }
+    .file-info .size-warn { color: #ff8844; font-size: 12px; }
+
+    /* 텍스트 입력 */
+    .text-input-area { display: none; }
+
+    .srt-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .srt-hint { font-size: 12px; color: #666; flex: 1; }
+
+    .srt-btn {
+      padding: 6px 14px;
+      background: #2a2a2a;
+      border: 1px solid #333;
+      border-radius: 6px;
+      color: #ccc;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .srt-btn:hover { background: #333; color: #fff; }
+
+    .text-input-area textarea {
+      width: 100%;
+      height: 200px;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 16px;
+      color: #e0e0e0;
+      font-size: 14px;
+      line-height: 1.6;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.15s;
+      margin-bottom: 16px;
+    }
+    .text-input-area textarea:focus { border-color: #444; }
+    .text-input-area textarea::placeholder { color: #555; }
+
+    /* 추출된 텍스트 영역 */
+    .transcript-area {
+      display: none;
+      margin-bottom: 20px;
+    }
+
+    .transcript-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .transcript-label {
+      font-size: 13px;
+      color: #888;
+    }
+
+    .transcript-label strong { color: #6adf6a; }
+
+    .transcript-edit {
+      width: 100%;
+      height: 160px;
+      background: #141414;
+      border: 1px solid #2a4a2a;
+      border-radius: 10px;
+      padding: 14px;
+      color: #ccc;
+      font-size: 13px;
+      line-height: 1.6;
+      resize: vertical;
+      outline: none;
+    }
+    .transcript-edit:focus { border-color: #3a7a3a; }
+
+    /* 버튼들 */
+    .generate-btn {
+      width: 100%;
+      padding: 16px;
+      background: #ff4444;
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .generate-btn:hover { background: #ff2222; }
+    .generate-btn:disabled { background: #2a2a2a; color: #555; cursor: not-allowed; }
+
+    /* 로딩 */
+    .loading-area {
+      display: none;
+      text-align: center;
+      padding: 60px 24px;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid #2a2a2a;
+      border-top-color: #ff4444;
+      border-radius: 50%;
+      margin: 0 auto 20px;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-area .loading-step {
+      font-size: 14px;
+      color: #777;
+      margin-bottom: 4px;
+    }
+    .loading-area .loading-step.active { color: #ccc; }
+    .loading-area .loading-step.done { color: #6adf6a; }
+
+    /* 에러 */
+    .error-box {
+      display: none;
+      padding: 16px 20px;
+      background: #2a1414;
+      border: 1px solid #5a2a2a;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      font-size: 14px;
+      color: #ff8888;
+    }
+
+    /* 결과 */
+    .result-area { display: none; margin-top: 40px; }
+
+    .result-section {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+
+    .result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid #2a2a2a;
+    }
+
+    .result-header h3 { font-size: 14px; font-weight: 600; color: #ccc; }
+    .result-actions { display: flex; gap: 8px; }
+
+    .copy-btn, .regen-btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      border: 1px solid #333;
+      transition: all 0.15s;
+    }
+    .copy-btn { background: #2a2a2a; color: #ccc; }
+    .copy-btn:hover { background: #333; }
+    .copy-btn.copied { background: #1a3a1a; border-color: #2a6a2a; color: #6adf6a; }
+    .regen-btn { background: none; color: #777; }
+    .regen-btn:hover { color: #ccc; background: #2a2a2a; }
+
+    .result-body { padding: 20px; }
+
+    .result-item {
+      padding: 12px 0;
+      border-bottom: 1px solid #222;
+    }
+    .result-item:last-child { border-bottom: none; padding-bottom: 0; }
+    .item-num { font-size: 11px; color: #555; margin-bottom: 4px; }
+    .result-text { font-size: 14px; color: #e0e0e0; line-height: 1.7; white-space: pre-wrap; }
+    .thumb-sub { font-size: 12px; color: #888; margin-bottom: 3px; }
+    .thumb-main { font-size: 16px; font-weight: 700; color: #fff; }
+
+    .hashtag-list { display: flex; flex-wrap: wrap; gap: 8px; }
+    .hashtag {
+      background: #2a2a2a;
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 13px;
+      color: #aaa;
+    }
+
+    .download-bar {
+      display: none;
+      margin-top: 8px;
+      padding: 16px 0;
+      text-align: center;
+    }
+
+    .download-btn {
+      padding: 12px 28px;
+      background: none;
+      border: 1px solid #333;
+      border-radius: 8px;
+      color: #aaa;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .download-btn:hover { background: #1a1a1a; color: #fff; }
+
+    .divider { height: 1px; background: #2a2a2a; margin: 32px 0; }
+
+    /* 사용 버튼 */
+    .title-row { display: flex; align-items: flex-start; gap: 12px; }
+    .title-row .result-text { flex: 1; }
+
+    .use-btn {
+      display: none;
+      padding: 5px 11px;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      border: 1px solid #333;
+      background: none;
+      color: #666;
+      transition: all 0.15s;
+      white-space: nowrap;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .use-btn:hover { color: #6adf6a; border-color: #2a6a2a; }
+    .use-btn.used { background: #1a3a1a; border-color: #2a6a2a; color: #6adf6a; }
+
+    /* 히스토리 버튼 */
+    .history-header-btn {
+      padding: 7px 14px;
+      background: none;
+      border: 1px solid #333;
+      border-radius: 6px;
+      color: #888;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s;
+      position: relative;
+    }
+    .history-header-btn:hover { color: #ccc; border-color: #555; }
+
+    .history-count {
+      display: inline-block;
+      background: #ff4444;
+      color: #fff;
+      font-size: 10px;
+      border-radius: 10px;
+      padding: 1px 5px;
+      margin-left: 5px;
+      vertical-align: middle;
+    }
+
+    /* 히스토리 오버레이 */
+    .history-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 100;
+    }
+    .history-overlay.open { display: block; }
+
+    /* 히스토리 패널 */
+    .history-panel {
+      position: fixed;
+      top: 0; right: -480px;
+      width: 460px;
+      height: 100vh;
+      background: #141414;
+      border-left: 1px solid #2a2a2a;
+      z-index: 101;
+      transition: right 0.25s ease;
+      display: flex;
+      flex-direction: column;
+    }
+    .history-panel.open { right: 0; }
+
+    .history-panel-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid #2a2a2a;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .history-panel-header h2 { font-size: 16px; font-weight: 600; color: #fff; }
+    .history-close {
+      background: none; border: none; color: #777;
+      font-size: 20px; cursor: pointer; padding: 4px; line-height: 1;
+    }
+    .history-close:hover { color: #fff; }
+
+    .history-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    .history-empty {
+      text-align: center;
+      color: #555;
+      font-size: 14px;
+      margin-top: 60px;
+      line-height: 1.8;
+    }
+
+    .history-item {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 10px;
+    }
+
+    .history-item-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .history-date { font-size: 11px; color: #555; }
+    .history-channel-badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 20px;
+    }
+    .history-channel-badge.healthyhub { background: #ff444422; color: #ff8888; }
+    .history-channel-badge.jeekim { background: #4488ff22; color: #88aaff; }
+
+    .history-used-label { font-size: 11px; color: #6adf6a; margin-bottom: 4px; }
+    .history-used-title { font-size: 14px; color: #e0e0e0; line-height: 1.5; }
+    .history-other-titles { margin-top: 10px; }
+    .history-other-label { font-size: 11px; color: #444; margin-bottom: 4px; }
+    .history-other-title { font-size: 12px; color: #555; line-height: 1.5; margin-bottom: 3px; }
+    .history-tags { font-size: 11px; color: #444; margin-top: 8px; }
+
+    .history-clear-btn {
+      width: 100%;
+      padding: 10px;
+      margin-top: 8px;
+      background: none;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      color: #555;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .history-clear-btn:hover { color: #ff8888; border-color: #5a2a2a; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>유튜브 메타데이터 생성기</h1>
+    <span class="subtitle">헬씨허브 · 지킴 전용</span>
+    <button class="history-header-btn" onclick="showHistory()">📋 기록 보기<span class="history-count" id="history-count" style="display:none;"></span></button>
+    <button class="settings-btn" id="settings-toggle" onclick="toggleSettings()">⚙ API 키 설정</button>
+  </header>
+
+  <!-- API 키 설정 패널 -->
+  <div class="api-panel" id="api-panel">
+    <div class="api-panel-inner">
+      <label>OpenAI API 키</label>
+      <input type="password" class="api-input" id="api-key-input" placeholder="sk-..." />
+      <button class="api-save-btn" id="api-save-btn" onclick="saveApiKey()">저장</button>
+      <span class="api-status" id="api-status"></span>
+    </div>
+  </div>
+
+  <div class="container">
+
+    <!-- 채널 선택 -->
+    <div class="section-label">채널 선택</div>
+    <div class="channel-selector">
+      <button class="channel-btn active" id="btn-healthyhub" onclick="selectChannel('healthyhub')">
+        <div class="ch-name">헬씨허브</div>
+        <div class="ch-desc">의약외품 · 밴드류 · 수면용품</div>
+        <span class="ch-badge">#의약외품 #shorts</span>
+      </button>
+      <button class="channel-btn jeekim" id="btn-jeekim" onclick="selectChannel('jeekim')">
+        <div class="ch-name">지킴 JEEKIM</div>
+        <div class="ch-desc">약국 세무 · 회계 전문가 교육</div>
+        <span class="ch-badge">#약국세무 #약사</span>
+      </button>
+    </div>
+
+    <!-- 입력 탭 -->
+    <div class="section-label">영상 내용 입력</div>
+    <div class="input-tabs">
+      <button class="tab-btn active" id="tab-file" onclick="switchTab('file')">영상 파일 업로드</button>
+      <button class="tab-btn" id="tab-text" onclick="switchTab('text')">스크립트 직접 입력</button>
+    </div>
+
+    <!-- 파일 업로드 패널 -->
+    <div id="panel-file">
+      <label class="upload-area" for="file-input" id="upload-label">
+        <div class="upload-icon">🎬</div>
+        <h3>영상 파일을 여기에 끌어다 놓거나 클릭해서 선택</h3>
+        <p>MP4, MOV, AVI, MP3 · 최대 25MB · 10분 기준 처리비용 약 100~150원</p>
+        <input type="file" id="file-input" accept="video/*,audio/*" onchange="handleFileSelect(this)">
+      </label>
+      <div class="file-info" id="file-info" style="display:none;">
+        <span>📄</span>
+        <span class="file-name" id="file-name"></span>
+        <span class="file-size" id="file-size"></span>
+        <span class="size-warn" id="size-warn"></span>
+      </div>
+    </div>
+
+    <!-- 텍스트 입력 패널 -->
+    <div id="panel-text" class="text-input-area">
+      <div class="srt-bar">
+        <span class="srt-hint">스크립트를 붙여넣거나, 자막 파일(.srt)을 불러오세요</span>
+        <label class="srt-btn" for="srt-input">SRT 파일 불러오기</label>
+        <input type="file" id="srt-input" accept=".srt,.txt" onchange="loadSRT(this)" style="display:none;">
+      </div>
+      <textarea id="script-input" placeholder="영상 스크립트나 주요 내용을 여기에 붙여넣으세요.
+
+예시:
+오늘은 주사 맞고 나서 어떻게 처리하면 좋은지 알려드릴게요.
+주사 자리에 이지톡 채혈밴드 붙이면 압박도 되고 흘러내리지 않아서..."></textarea>
+    </div>
+
+    <!-- 영상 → 텍스트 변환 결과 (자동으로 나타남) -->
+    <div class="transcript-area" id="transcript-area">
+      <div class="transcript-header">
+        <span class="transcript-label">변환된 텍스트 <strong>✓ 수정 가능</strong></span>
+      </div>
+      <textarea class="transcript-edit" id="transcript-text" placeholder="영상 텍스트가 여기에 표시됩니다..."></textarea>
+    </div>
+
+    <!-- 에러 메시지 -->
+    <div class="error-box" id="error-box"></div>
+
+    <!-- 메인 버튼 -->
+    <button class="generate-btn" id="generate-btn" onclick="startFlow()">메타데이터 생성하기</button>
+
+    <!-- 로딩 -->
+    <div class="loading-area" id="loading-area">
+      <div class="spinner"></div>
+      <p class="loading-step" id="step-1">① 영상 음성 텍스트로 변환 중...</p>
+      <p class="loading-step" id="step-2">② 핵심 키워드 분석 중...</p>
+      <p class="loading-step" id="step-3">③ 제목·설명·태그 생성 중...</p>
+    </div>
+
+    <div class="divider" id="result-divider" style="display:none;"></div>
+
+    <!-- 결과 -->
+    <div class="result-area" id="result-area">
+      <div class="section-label">생성된 메타데이터</div>
+
+      <!-- 제목 -->
+      <div class="result-section">
+        <div class="result-header">
+          <h3>제목 3가지</h3>
+          <div class="result-actions">
+            <button class="regen-btn" onclick="regenSection('title')">↺ 다시 생성</button>
+            <button class="copy-btn" id="copy-title" onclick="copySection('title')">복사</button>
+          </div>
+        </div>
+        <div class="result-body">
+          <div class="result-item title-row"><div class="item-num">01</div><div class="result-text" id="title-1"></div><button class="use-btn" id="use-btn-1" onclick="markUsed(1)">✓ 이걸 사용했어요</button></div>
+          <div class="result-item title-row"><div class="item-num">02</div><div class="result-text" id="title-2"></div><button class="use-btn" id="use-btn-2" onclick="markUsed(2)">✓ 이걸 사용했어요</button></div>
+          <div class="result-item title-row"><div class="item-num">03</div><div class="result-text" id="title-3"></div><button class="use-btn" id="use-btn-3" onclick="markUsed(3)">✓ 이걸 사용했어요</button></div>
+        </div>
+      </div>
+
+      <!-- 썸네일 제목 -->
+      <div class="result-section">
+        <div class="result-header">
+          <h3>썸네일 제목 3가지</h3>
+          <div class="result-actions">
+            <button class="regen-btn" onclick="regenSection('thumbnail')">↺ 다시 생성</button>
+            <button class="copy-btn" id="copy-thumbnail" onclick="copySection('thumbnail')">복사</button>
+          </div>
+        </div>
+        <div class="result-body" id="result-thumbnail-body">
+          <div class="result-item">
+            <div class="item-num">01</div>
+            <div class="thumb-sub" id="thumb-1-top"></div>
+            <div class="thumb-main" id="thumb-1-bottom"></div>
+          </div>
+          <div class="result-item">
+            <div class="item-num">02</div>
+            <div class="thumb-sub" id="thumb-2-top"></div>
+            <div class="thumb-main" id="thumb-2-bottom"></div>
+          </div>
+          <div class="result-item">
+            <div class="item-num">03</div>
+            <div class="thumb-sub" id="thumb-3-top"></div>
+            <div class="thumb-main" id="thumb-3-bottom"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 설명란 -->
+      <div class="result-section">
+        <div class="result-header">
+          <h3>설명란</h3>
+          <div class="result-actions">
+            <button class="regen-btn" onclick="regenSection('description')">↺ 다시 생성</button>
+            <button class="copy-btn" id="copy-description" onclick="copySection('description')">복사</button>
+          </div>
+        </div>
+        <div class="result-body">
+          <div class="result-text" id="result-description"></div>
+        </div>
+      </div>
+
+      <!-- 해시태그 -->
+      <div class="result-section">
+        <div class="result-header">
+          <h3>해시태그</h3>
+          <div class="result-actions">
+            <button class="regen-btn" onclick="regenSection('hashtag')">↺ 다시 생성</button>
+            <button class="copy-btn" id="copy-hashtag" onclick="copySection('hashtag')">복사</button>
+          </div>
+        </div>
+        <div class="result-body">
+          <div class="hashtag-list" id="result-hashtag"></div>
+        </div>
+      </div>
+
+      <div class="download-bar" id="download-bar">
+        <button class="download-btn" onclick="downloadResult()">전체 텍스트 파일로 저장</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 히스토리 오버레이 -->
+  <div class="history-overlay" id="history-overlay" onclick="hideHistory()"></div>
+
+  <!-- 히스토리 패널 -->
+  <div class="history-panel" id="history-panel">
+    <div class="history-panel-header">
+      <h2>사용한 제목 기록</h2>
+      <button class="history-close" onclick="hideHistory()">✕</button>
+    </div>
+    <div class="history-list" id="history-list"></div>
+  </div>
+
+  <script>
+    let currentChannel = 'healthyhub';
+    let currentTab = 'file';
+    let selectedFile = null;
+    let lastTranscript = '';
+
+    // ── 초기화 ──────────────────────────────────────────
+    window.onload = () => {
+      switchTab('file');
+      const saved = localStorage.getItem('openai_api_key');
+      if (saved) {
+        document.getElementById('api-key-input').value = saved;
+        document.getElementById('api-status').textContent = '저장됨 ✓';
+      }
+      updateHistoryCount();
+    };
+
+    // ── API 키 설정 ──────────────────────────────────────
+    function toggleSettings() {
+      const panel = document.getElementById('api-panel');
+      const btn = document.getElementById('settings-toggle');
+      const isOpen = panel.classList.contains('open');
+      panel.classList.toggle('open', !isOpen);
+      btn.classList.toggle('active', !isOpen);
+    }
+
+    function saveApiKey() {
+      const key = document.getElementById('api-key-input').value.trim();
+      if (!key.startsWith('sk-')) {
+        alert('올바른 API 키 형식이 아니에요. sk- 로 시작해야 해요.');
+        return;
+      }
+      localStorage.setItem('openai_api_key', key);
+      const btn = document.getElementById('api-save-btn');
+      const status = document.getElementById('api-status');
+      btn.textContent = '저장됨 ✓';
+      btn.classList.add('saved');
+      status.textContent = '앱 껐다 켜도 유지돼요';
+      setTimeout(() => {
+        btn.textContent = '저장';
+        btn.classList.remove('saved');
+        status.textContent = '저장됨 ✓';
+      }, 2500);
+    }
+
+    function getApiKey() {
+      return localStorage.getItem('openai_api_key') || document.getElementById('api-key-input').value.trim();
+    }
+
+    // ── 채널 선택 ────────────────────────────────────────
+    function selectChannel(ch) {
+      currentChannel = ch;
+      document.getElementById('btn-healthyhub').className = 'channel-btn' + (ch === 'healthyhub' ? ' active' : '');
+      document.getElementById('btn-jeekim').className = 'channel-btn jeekim' + (ch === 'jeekim' ? ' active' : '');
+    }
+
+    // ── 탭 전환 ──────────────────────────────────────────
+    function switchTab(tab) {
+      currentTab = tab;
+      document.getElementById('tab-file').classList.toggle('active', tab === 'file');
+      document.getElementById('tab-text').classList.toggle('active', tab === 'text');
+      document.getElementById('panel-file').style.display = tab === 'file' ? 'block' : 'none';
+      document.getElementById('panel-text').style.display = tab === 'text' ? 'block' : 'none';
+      document.getElementById('transcript-area').style.display = 'none';
+    }
+
+    // ── SRT 파일 파싱 ────────────────────────────────────
+    function loadSRT(input) {
+      if (!input.files || !input.files[0]) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const raw = e.target.result;
+        // 순번, 타임스탬프 줄 제거하고 텍스트만 추출
+        const lines = raw.split('\n');
+        const text = lines
+          .filter(line => {
+            const t = line.trim();
+            return t.length > 0
+              && !/^\d+$/.test(t)
+              && !/\d{2}:\d{2}:\d{2}[,\.]\d{3}\s*-->/.test(t);
+          })
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        document.getElementById('script-input').value = text;
+        input.value = '';
+      };
+      reader.readAsText(input.files[0], 'UTF-8');
+    }
+
+    // ── 파일 선택 ────────────────────────────────────────
+    function handleFileSelect(input) {
+      if (!input.files || !input.files[0]) return;
+      selectedFile = input.files[0];
+      const sizeMB = (selectedFile.size / 1024 / 1024).toFixed(1);
+      const fileInfo = document.getElementById('file-info');
+      fileInfo.style.display = 'flex';
+      document.getElementById('file-name').textContent = selectedFile.name;
+      document.getElementById('file-size').textContent = sizeMB + 'MB';
+
+      const warn = document.getElementById('size-warn');
+      if (selectedFile.size > 25 * 1024 * 1024) {
+        warn.textContent = '⚠ 25MB 초과 — 스크립트 직접 입력 탭을 사용해주세요';
+        selectedFile = null;
+      } else {
+        warn.textContent = '';
+        document.getElementById('upload-label').classList.add('has-file');
+      }
+      document.getElementById('transcript-area').style.display = 'none';
+    }
+
+    // ── 메인 흐름 ────────────────────────────────────────
+    async function startFlow() {
+      const apiKey = getApiKey();
+      if (!apiKey || !apiKey.startsWith('sk-')) {
+        showError('API 키가 없어요. 오른쪽 상단 ⚙ API 키 설정 버튼을 눌러서 먼저 입력해주세요.');
+        return;
+      }
+
+      const hasFile = currentTab === 'file' && selectedFile;
+      const hasText = currentTab === 'text' && document.getElementById('script-input').value.trim().length > 10;
+      const hasTranscript = document.getElementById('transcript-area').style.display !== 'none'
+                            && document.getElementById('transcript-text').value.trim().length > 10;
+
+      if (!hasFile && !hasText && !hasTranscript) {
+        showError(currentTab === 'file' ? '영상 파일을 먼저 선택해주세요.' : '스크립트를 입력해주세요 (10자 이상).');
+        return;
+      }
+
+      hideError();
+      setUIGenerating(true);
+
+      try {
+        let transcript = '';
+
+        if (hasTranscript) {
+          transcript = document.getElementById('transcript-text').value.trim();
+          await runGenerateMetadata(apiKey, transcript);
+        } else if (hasFile) {
+          transcript = await runTranscribe(apiKey);
+          if (!transcript) return;
+          await runGenerateMetadata(apiKey, transcript);
+        } else {
+          transcript = document.getElementById('script-input').value.trim();
+          await runGenerateMetadata(apiKey, transcript);
+        }
+      } catch (e) {
+        setUIGenerating(false);
+        showError('오류가 발생했어요: ' + e.message);
+      }
+    }
+
+    // ── 1단계: 영상 → 텍스트 변환 ────────────────────────
+    async function runTranscribe(apiKey) {
+      setStep(1, 'active');
+
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('model', 'whisper-1');
+      formData.append('language', 'ko');
+
+      const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + apiKey },
+        body: formData
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        setUIGenerating(false);
+        showError('영상 텍스트 변환 실패: ' + (err.error?.message || '알 수 없는 오류'));
+        return null;
+      }
+
+      const data = await res.json();
+      const transcript = data.text;
+
+      setStep(1, 'done');
+      lastTranscript = transcript;
+
+      document.getElementById('transcript-text').value = transcript;
+      document.getElementById('transcript-area').style.display = 'block';
+
+      return transcript;
+    }
+
+    // ── 2단계: 메타데이터 생성 ───────────────────────────
+    async function runGenerateMetadata(apiKey, transcript) {
+      setStep(2, 'active');
+      setStep(3, 'active');
+
+      const prompt = buildPrompt(transcript);
+
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + apiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.7
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        setUIGenerating(false);
+        showError('메타데이터 생성 실패: ' + (err.error?.message || '알 수 없는 오류'));
+        return;
+      }
+
+      const data = await res.json();
+      const raw = data.choices[0].message.content;
+
+      setStep(2, 'done');
+      setStep(3, 'done');
+
+      parseAndShowResult(raw);
+      setUIGenerating(false);
+    }
+
+    // ── 채널별 프롬프트 ──────────────────────────────────
+    function buildPrompt(transcript) {
+      if (currentChannel === 'healthyhub') {
+        return `당신은 헬씨허브 유튜브 채널 메타데이터 전문가입니다.
+헬씨허브는 의약외품(밴드류, 수면용품, 반려동물용품 등 OEM) 브랜드입니다. 시청자는 일반 소비자입니다.
+
+【제목 규칙】
+- 핵심 원칙: 제품명이 아닌 "사용 상황 또는 문제" 중심으로 작성
+- 검색 키워드를 제목 앞에 배치
+- 글자 수: 반드시 30자 이상 60자 이하 (유튜브 검색 결과에서 60자 이후 잘림)
+- 잘 되는 패턴:
+  · "~하는 분들 이거 보세요"
+  · "~할 때 이거면 됩니다"
+  · "~없애는 법 찾다가 발견한 ~"
+  · "~해결하는 법"
+- 실제 예시 (제품명→상황 전환):
+  · "저자극 방수밴드" → "상처 있어도 샤워 마음 편히 하는 법"
+  · "저자극 반창고" → "반창고 뗄 때 아픈 분들 이거 보세요"
+  · "코골이 방지밴드" → "코골이 없애는 법 찾다가 발견한 밴드"
+  · "니플패치" → "러닝할 때 니플 쓸림 해결하는 법"
+
+【썸네일 제목 규칙】
+- 10자 이내, 강한 임팩트
+- 검색 키워드나 해결책 중심
+
+【설명란 규칙】
+- 첫 줄: 핵심 검색 키워드를 반드시 포함 (유튜브 검색 결과 미리보기에 첫 2줄만 노출됨)
+- 두 번째 줄: 제품의 핵심 특징 1가지 (키워드 자연스럽게 포함)
+- 세 번째 줄: 추가 특징 또는 사용 대상
+- 빈 줄 하나
+- 마지막: 구매처 링크 자리
+
+【태그 규칙】
+- 순서 중요: 앞 3개가 유튜브 제목 위에 크게 노출되므로 가장 핵심 검색어를 앞에 배치
+- 검색량 층위를 섞어서 구성:
+  · 넓은 태그 2~3개 (경쟁 높지만 노출 넓음, 예: #밴드 #상처케어)
+  · 중간 태그 3~4개 (균형, 예: #방수밴드 #하이드로콜로이드)
+  · 좁은 태그 3~4개 (경쟁 약하고 타겟 정확, 예: #민감피부밴드추천 #상처빨리낫는법)
+- 사용 대상 키워드 1~2개 (예: #민감성피부 #운동할때)
+- 고정 태그: #의약외품 #shorts 반드시 포함
+- 총 10~15개 (15개 초과 시 유튜브가 전부 무시하므로 절대 초과 금지)
+
+아래 영상 스크립트를 분석해서 다음 형식으로 정확히 출력해주세요:
+
+[제목1] (사용 상황/문제 중심, 검색 키워드 앞 배치)
+[제목2]
+[제목3]
+[썸네일1] (10자 이내)
+[썸네일2] (10자 이내)
+[썸네일3] (10자 이내)
+[설명란] (첫 3줄 핵심 특징+SEO키워드, 빈 줄, "▶ 구매하기\n[스마트스토어 링크]\n[쿠팡 링크]")
+[해시태그] (#의약외품 #shorts 반드시 포함, 총 10~15개 공백으로 구분)
+
+스크립트:
+${transcript}`;
+      } else {
+        return `당신은 지킴 JEEKIM 유튜브 채널 메타데이터 전문가입니다.
+지킴은 약국 세무/회계 전문가 교육 콘텐츠 채널입니다. 시청자는 약사, 약국 원장님입니다.
+
+【제목 규칙】
+- 형식: "핵심주제 완전정리 | 부연설명 또는 시청해야 할 이유"
+- 파이프( | )로 앞뒤 구분
+- 앞부분: 검색 키워드 포함, 완전정리/총정리/해야할까 등 명확한 액션
+- 뒷부분: 구체적 세부 내용 나열 또는 "약사님이 꼭 알아야 할 것"류 문구
+- 글자 수: 반드시 30자 이상 60자 이하 (유튜브 검색 결과에서 60자 이후 잘림)
+- 실제 예시: "[실제 영상 제목 제거]"
+- 실제 예시: "약국 권리금 세 총정리, 원천세·소득세·건보료 협의 범위는? | 쉽고 빠르게 알아보는 약국 권리금 Ep.2편"
+
+【썸네일 제목 규칙】
+- 반드시 2줄로 구성
+- 윗줄(보조): 상황 설정 또는 질문 (짧게, 10~20자)
+- 아랫줄(주): 핵심 키워드나 임팩트 문장 (굵게 보여야 하므로 6~12자)
+- 실제 예시: 윗줄 "변경된 정책, 약사님에겐 독?" / 아랫줄 "통합고용세액공제"
+- 실제 예시: 윗줄 "약국 양수도 예정이신가요?" / 아랫줄 "이건 절대 놓치지 마세요"
+- 실제 예시: 윗줄 "완천세, 종소세, 건보료..." / 아랫줄 "약국 권리금, 어디까지?"
+
+【설명란 규칙】
+- 첫 줄: 핵심 검색 키워드를 반드시 포함 (유튜브 검색 결과 미리보기에 첫 2줄만 노출됨)
+- 두 번째 줄: 영상에서 다루는 핵심 내용 1가지 (구체적 키워드 포함)
+- 맨 앞에 해시태그 나열 (5~6개)
+- 한 칸 띄고 위의 설명 텍스트
+- 시청자가 클릭하고 싶어지는 문장으로
+
+【태그 규칙】
+- 순서 중요: 앞 3개가 유튜브 제목 위에 크게 노출되므로 가장 핵심 검색어를 앞에 배치
+- 검색량 층위를 섞어서 구성:
+  · 넓은 태그 2~3개 (경쟁 높지만 노출 넓음, 예: #약사 #세무 #약국)
+  · 중간 태그 3~4개 (균형, 예: #약국세무 #약국회계 #종합소득세)
+  · 좁은 태그 3~4개 (경쟁 약하고 타겟 정확, 예: #약국권리금세금 #개국약사세무)
+- 시청 대상 키워드 1~2개 (예: #약국원장 #개국약사)
+- 고정 태그: #약국세무 #약사 반드시 포함
+- 총 10~15개 (15개 초과 시 유튜브가 전부 무시하므로 절대 초과 금지)
+
+아래 영상 스크립트를 분석해서 다음 형식으로 정확히 출력해주세요:
+
+[제목1] (규칙대로 파이프 구분)
+[제목2]
+[제목3]
+[썸네일1_윗줄] (보조 문구)
+[썸네일1_아랫줄] (핵심 문구)
+[썸네일2_윗줄]
+[썸네일2_아랫줄]
+[썸네일3_윗줄]
+[썸네일3_아랫줄]
+[설명란] (해시태그 먼저 + 설명 텍스트, #약국세무 #약사 반드시 포함)
+[해시태그] (#약국세무 #약사 반드시 포함, 총 10~15개 공백으로 구분)
+
+스크립트:
+${transcript}`;
+      }
+    }
+
+    // ── 결과 파싱 ────────────────────────────────────────
+    function parseAndShowResult(raw) {
+      const get = (tag) => {
+        const re = new RegExp(`\\[${tag}\\]\\s*([^\\[]+)`, 'i');
+        const m = raw.match(re);
+        return m ? m[1].trim() : '';
+      };
+
+      document.getElementById('title-1').textContent = get('제목1');
+      document.getElementById('title-2').textContent = get('제목2');
+      document.getElementById('title-3').textContent = get('제목3');
+
+      if (currentChannel === 'jeekim') {
+        // 지킴: 2줄 썸네일
+        for (let i = 1; i <= 3; i++) {
+          document.getElementById(`thumb-${i}-top`).textContent = get(`썸네일${i}_윗줄`);
+          document.getElementById(`thumb-${i}-bottom`).textContent = get(`썸네일${i}_아랫줄`);
+        }
+      } else {
+        // 헬씨허브: 단일 줄 (기존 방식, 윗줄에만 표시)
+        for (let i = 1; i <= 3; i++) {
+          document.getElementById(`thumb-${i}-top`).textContent = '';
+          document.getElementById(`thumb-${i}-bottom`).textContent = get(`썸네일${i}`);
+        }
+      }
+
+      document.getElementById('result-description').textContent = get('설명란');
+
+      const tagStr = get('해시태그');
+      const tags = tagStr.split(/\s+/).filter(t => t.startsWith('#'));
+      renderHashtags(tags);
+
+      document.getElementById('result-divider').style.display = 'block';
+      document.getElementById('result-area').style.display = 'block';
+      document.getElementById('download-bar').style.display = 'block';
+      document.getElementById('generate-btn').style.display = 'block';
+      document.getElementById('generate-btn').textContent = '다시 생성하기';
+
+      // 사용 버튼 표시 및 초기화
+      [1,2,3].forEach(i => {
+        const btn = document.getElementById('use-btn-' + i);
+        btn.style.display = 'inline-block';
+        btn.textContent = '✓ 이걸 사용했어요';
+        btn.classList.remove('used');
+      });
+    }
+
+    // ── 항목별 다시 생성 ─────────────────────────────────
+    async function regenSection(section) {
+      const apiKey = getApiKey();
+      if (!apiKey) { showError('API 키를 먼저 설정해주세요.'); return; }
+
+      const transcript = document.getElementById('transcript-text').value.trim()
+        || document.getElementById('script-input').value.trim();
+      if (!transcript) { showError('스크립트가 없어요. 영상을 다시 분석해주세요.'); return; }
+
+      const sectionNames = { title: '제목', thumbnail: '썸네일 제목', description: '설명란', hashtag: '해시태그' };
+      const btn = document.querySelector(`[onclick="regenSection('${section}')"]`);
+      const original = btn.textContent;
+      btn.textContent = '생성 중...';
+      btn.disabled = true;
+
+      try {
+        const extraInstruction = {
+          title: '제목 3가지만 다시 생성해주세요. [제목1] [제목2] [제목3] 형식으로만 출력.',
+          thumbnail: '썸네일 제목 3가지만 다시 생성해주세요. [썸네일1] [썸네일2] [썸네일3] 형식으로만 출력.',
+          description: '설명란만 다시 생성해주세요. [설명란] 형식으로만 출력.',
+          hashtag: '해시태그만 다시 생성해주세요. [해시태그] 형식으로만 출력.'
+        };
+
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: buildPrompt(transcript) + '\n\n' + extraInstruction[section] }],
+            temperature: 0.9
+          })
+        });
+
+        const data = await res.json();
+        const raw = data.choices[0].message.content;
+
+        if (section === 'title') {
+          const lines = raw.match(/\[제목\d\]\s*([^\[]+)/gi) || [];
+          lines.forEach((l, i) => {
+            const m = l.match(/\[제목\d\]\s*(.+)/i);
+            if (m) document.getElementById('title-' + (i+1)).textContent = m[1].trim();
+          });
+        } else if (section === 'thumbnail') {
+          const lines = raw.match(/\[썸네일\d\]\s*([^\[]+)/gi) || [];
+          lines.forEach((l, i) => {
+            const m = l.match(/\[썸네일\d\]\s*(.+)/i);
+            if (m) document.getElementById('thumb-' + (i+1)).textContent = m[1].trim();
+          });
+        } else if (section === 'description') {
+          const m = raw.match(/\[설명란\]\s*([\s\S]+)/i);
+          if (m) document.getElementById('result-description').textContent = m[1].trim();
+        } else if (section === 'hashtag') {
+          const m = raw.match(/\[해시태그\]\s*(.+)/i);
+          if (m) {
+            const tags = m[1].trim().split(/\s+/).filter(t => t.startsWith('#'));
+            renderHashtags(tags);
+          }
+        }
+      } catch(e) {
+        showError('다시 생성 실패: ' + e.message);
+      } finally {
+        btn.textContent = original;
+        btn.disabled = false;
+      }
+    }
+
+    // ── UI 상태 관리 ─────────────────────────────────────
+    function setUIGenerating(on) {
+      document.getElementById('generate-btn').style.display = on ? 'none' : 'block';
+      document.getElementById('loading-area').style.display = on ? 'block' : 'none';
+      if (on) {
+        ['step-1','step-2','step-3'].forEach(id => {
+          document.getElementById(id).className = 'loading-step';
+        });
+        if (currentTab === 'text' || document.getElementById('transcript-area').style.display !== 'none') {
+          setStep(1, 'done');
+        }
+        document.getElementById('result-area').style.display = 'none';
+        document.getElementById('result-divider').style.display = 'none';
+        document.getElementById('download-bar').style.display = 'none';
+      }
+    }
+
+    function setStep(n, state) {
+      const el = document.getElementById('step-' + n);
+      el.className = 'loading-step ' + state;
+      if (state === 'done') el.textContent = el.textContent.replace('중...', '완료 ✓');
+    }
+
+    function showError(msg) {
+      const box = document.getElementById('error-box');
+      box.textContent = msg;
+      box.style.display = 'block';
+    }
+
+    function hideError() {
+      document.getElementById('error-box').style.display = 'none';
+    }
+
+    // ── 복사 ─────────────────────────────────────────────
+    function copySection(section) {
+      let text = '';
+      const btn = document.getElementById('copy-' + section);
+
+      if (section === 'title') {
+        text = [1,2,3].map(i => document.getElementById('title-'+i).textContent).filter(Boolean).join('\n');
+      } else if (section === 'thumbnail') {
+        text = [1,2,3].map(i => {
+          const top = document.getElementById(`thumb-${i}-top`).textContent;
+          const bot = document.getElementById(`thumb-${i}-bottom`).textContent;
+          return top ? `${top}\n${bot}` : bot;
+        }).filter(Boolean).join('\n\n');
+      } else if (section === 'description') {
+        text = document.getElementById('result-description').textContent;
+      } else if (section === 'hashtag') {
+        text = Array.from(document.querySelectorAll('#result-hashtag .hashtag')).map(el => el.textContent).join(' ');
+      }
+
+      navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = '복사됨 ✓';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = '복사'; btn.classList.remove('copied'); }, 2000);
+      });
+    }
+
+    // ── 해시태그 렌더링 ──────────────────────────────────
+    function renderHashtags(tags) {
+      const container = document.getElementById('result-hashtag');
+      container.innerHTML = '';
+      tags.forEach(tag => {
+        const el = document.createElement('span');
+        el.className = 'hashtag';
+        el.textContent = tag;
+        container.appendChild(el);
+      });
+    }
+
+    // ── 사용한 제목 체크 & 히스토리 ─────────────────────
+    function markUsed(idx) {
+      [1,2,3].forEach(i => {
+        const btn = document.getElementById('use-btn-' + i);
+        btn.textContent = '✓ 이걸 사용했어요';
+        btn.classList.remove('used');
+      });
+
+      const btn = document.getElementById('use-btn-' + idx);
+      btn.textContent = '✓ 사용함';
+      btn.classList.add('used');
+
+      const now = new Date();
+      const record = {
+        id: Date.now(),
+        date: `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`,
+        channel: currentChannel,
+        titles: [1,2,3].map(i => document.getElementById('title-'+i).textContent),
+        usedIndex: idx,
+        usedTitle: document.getElementById('title-'+idx).textContent,
+        description: document.getElementById('result-description').textContent,
+        hashtags: Array.from(document.querySelectorAll('#result-hashtag .hashtag')).map(el => el.textContent).join(' ')
+      };
+
+      const history = JSON.parse(localStorage.getItem('yt_metadata_history') || '[]');
+      history.unshift(record);
+      if (history.length > 100) history.splice(100);
+      localStorage.setItem('yt_metadata_history', JSON.stringify(history));
+      updateHistoryCount();
+    }
+
+    function updateHistoryCount() {
+      const history = JSON.parse(localStorage.getItem('yt_metadata_history') || '[]');
+      const badge = document.getElementById('history-count');
+      if (history.length > 0) {
+        badge.textContent = history.length;
+        badge.style.display = 'inline-block';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+
+    function showHistory() {
+      document.getElementById('history-overlay').classList.add('open');
+      document.getElementById('history-panel').classList.add('open');
+      renderHistory();
+    }
+
+    function hideHistory() {
+      document.getElementById('history-overlay').classList.remove('open');
+      document.getElementById('history-panel').classList.remove('open');
+    }
+
+    function renderHistory() {
+      const history = JSON.parse(localStorage.getItem('yt_metadata_history') || '[]');
+      const list = document.getElementById('history-list');
+
+      if (history.length === 0) {
+        list.innerHTML = '<div class="history-empty">아직 기록이 없어요.<br>제목 옆 "이걸 사용했어요"를 누르면<br>여기에 쌓여요.</div>';
+        return;
+      }
+
+      const items = history.map(r => {
+        const chLabel = r.channel === 'healthyhub' ? '헬씨허브' : '지킴';
+        const otherTitles = r.titles
+          .filter((_, i) => i+1 !== r.usedIndex)
+          .map(t => `<div class="history-other-title">· ${t}</div>`)
+          .join('');
+        const tagPreview = r.hashtags ? r.hashtags.split(' ').slice(0,4).join(' ') + ' ···' : '';
+
+        return `
+          <div class="history-item">
+            <div class="history-item-meta">
+              <span class="history-date">${r.date}</span>
+              <span class="history-channel-badge ${r.channel}">${chLabel}</span>
+            </div>
+            <div class="history-used-label">✓ 사용한 제목</div>
+            <div class="history-used-title">${r.usedTitle}</div>
+            <div class="history-other-titles">
+              <div class="history-other-label">후보로 남긴 제목</div>
+              ${otherTitles}
+            </div>
+            ${tagPreview ? `<div class="history-tags">${tagPreview}</div>` : ''}
+          </div>`;
+      }).join('');
+
+      list.innerHTML = items + `<button class="history-clear-btn" onclick="clearHistory()">기록 전체 삭제</button>`;
+    }
+
+    function clearHistory() {
+      if (!confirm('기록을 전부 삭제할까요?')) return;
+      localStorage.removeItem('yt_metadata_history');
+      updateHistoryCount();
+      renderHistory();
+    }
+
+    // ── 파일 저장 ────────────────────────────────────────
+    function downloadResult() {
+      const ch = currentChannel === 'healthyhub' ? '헬씨허브' : '지킴';
+      const now = new Date();
+      const date = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
+
+      const titles = [1,2,3].map(i => `${i}. ${document.getElementById('title-'+i).textContent}`).join('\n');
+      const thumbs = [1,2,3].map(i => {
+        const top = document.getElementById(`thumb-${i}-top`).textContent;
+        const bot = document.getElementById(`thumb-${i}-bottom`).textContent;
+        return `${i}. ${top ? top + ' / ' : ''}${bot}`;
+      }).join('\n');
+      const desc = document.getElementById('result-description').textContent;
+      const tags = Array.from(document.querySelectorAll('#result-hashtag .hashtag')).map(el => el.textContent).join(' ');
+
+      const content = `[${ch}] 유튜브 메타데이터\n생성일: ${date}\n\n============================\n제목 후보\n============================\n${titles}\n\n============================\n썸네일 제목\n============================\n${thumbs}\n\n============================\n설명란\n============================\n${desc}\n\n============================\n해시태그\n============================\n${tags}\n`;
+
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `유튜브메타데이터_${ch}_${date}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  </script>
+
+</body>
+</html>
