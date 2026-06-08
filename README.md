@@ -2,7 +2,7 @@
 
 헬씨허브 · 지킴 유튜브 채널 전용 메타데이터 자동 생성 도구
 
-🔗 **[라이브 데모 보러가기](#)** ← 배포 후 URL 업데이트 예정
+🔗 **[라이브 데모 보러가기](https://youtube-metadata-generator-chi.vercel.app/)**
 
 ---
 
