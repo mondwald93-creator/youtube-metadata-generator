@@ -790,6 +790,7 @@
     let selectedFile = null;
     let lastTranscript = '';
     let lastFrames = [];
+    let lastSearchData = []; // 유튜브 자동완성에서 가져온 실제 검색어 (다시 생성 시 재사용)
 
     // ── 초기화 ──────────────────────────────────────────
     window.onload = () => {
@@ -1148,8 +1149,63 @@
     }
 
     // ── 2단계: 메타데이터 생성 ───────────────────────────
+    // ── 유튜브 자동완성 검색어 조회 ──────────────────────
+    // 유튜브 검색창에 칠 때 나오는 추천 검색어 = 사람들이 실제로 검색하는 문구.
+    // 비공식 경로라 실패할 수 있으므로, 실패하면 조용히 빈 결과로 넘어간다 (도구는 정상 작동).
+    function fetchSuggestions(query) {
+      return new Promise((resolve) => {
+        const cb = 'ytSuggest_' + Math.random().toString(36).slice(2);
+        const script = document.createElement('script');
+        const timer = setTimeout(() => { cleanup(); resolve([]); }, 4000);
+        function cleanup() { delete window[cb]; script.remove(); clearTimeout(timer); }
+        window[cb] = (data) => {
+          cleanup();
+          const items = (data && data[1]) || [];
+          resolve(items.map(x => Array.isArray(x) ? x[0] : x).filter(s => typeof s === 'string'));
+        };
+        script.onerror = () => { cleanup(); resolve([]); };
+        script.src = 'https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&hl=ko&oe=utf-8&q='
+          + encodeURIComponent(query) + '&jsonp=' + cb;
+        document.body.appendChild(script);
+      });
+    }
+
+    async function fetchSearchData(apiKey, transcript) {
+      try {
+        // 1) 스크립트에서 검색 키워드 후보 추출 (저비용 호출)
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content:
+              '아래 영상 스크립트를 보고, 이 영상을 찾을 사람이 유튜브 검색창에 입력할 법한 검색어 후보를 3개만 출력해주세요.\n'
+              + '- 한 줄에 하나씩, 검색어만 출력 (번호·설명 금지)\n'
+              + '- 2~5단어의 짧은 검색어로 (예: "약국 양수도 세금")\n\n스크립트:\n' + transcript.slice(0, 3000) }],
+            temperature: 0.2
+          })
+        });
+        if (!res.ok) return [];
+        const data = await res.json();
+        const keywords = data.choices[0].message.content
+          .split('\n').map(s => s.replace(/^[\d\.\-\s]+/, '').trim()).filter(s => s.length > 1).slice(0, 3);
+
+        // 2) 각 후보로 유튜브 자동완성 조회
+        const results = [];
+        for (const kw of keywords) {
+          const suggestions = await fetchSuggestions(kw);
+          results.push({ keyword: kw, suggestions: suggestions.slice(0, 8) });
+        }
+        return results;
+      } catch (e) {
+        return []; // 검색어 조회 실패해도 생성은 계속 진행
+      }
+    }
+
     async function runGenerateMetadata(apiKey, transcript) {
       setStep(2, 'active');
+
+      lastSearchData = await fetchSearchData(apiKey, transcript);
       setStep(3, 'active');
 
       const prompt = buildPrompt(transcript);
@@ -1185,7 +1241,19 @@
     }
 
     // ── 채널별 프롬프트 ──────────────────────────────────
+    function buildSearchSection() {
+      const found = (lastSearchData || []).filter(d => d.suggestions && d.suggestions.length > 0);
+      if (found.length === 0) return '';
+      return `
+【실제 유튜브 검색어 데이터 — 방금 유튜브에서 조회한 실제 자동완성 검색어】
+${found.map(d => `- "${d.keyword}" 입력 시 추천: ${d.suggestions.join(' / ')}`).join('\n')}
+- 제목1(검색 노출용), 해시태그, 설명란 첫 줄에는 위 실제 검색어 중 영상 내용과 일치하는 표현을 우선 사용
+- 단, 영상 내용과 맞지 않는 검색어를 억지로 끼워 넣지 말 것
+`;
+    }
+
     function buildPrompt(transcript) {
+      const searchSection = buildSearchSection();
       if (currentChannel === 'healthyhub') {
         return `당신은 헬씨허브 유튜브 채널 메타데이터 전문가입니다.
 헬씨허브는 의약외품(밴드류, 수면용품, 반려동물용품 등 OEM) 브랜드입니다. 시청자는 일반 소비자입니다.
@@ -1193,7 +1261,7 @@
 【작업 순서 — 반드시 이 순서로】
 1단계: 스크립트를 먼저 분석해서 ① 이 영상의 정확한 세부 주제(포괄 주제 금지), ② 영상에 실제 등장한 구체 정보 3~5개(상황, 대상, 효과, 사용법, 숫자), ③ 정확히 누구의 어떤 상황을 위한 영상인지 추출한다.
 2단계: 1단계에서 추출한 재료만 사용해서 제목·썸네일·설명란·해시태그를 만든다. 스크립트에 없는 내용을 지어내지 말 것.
-
+${searchSection}
 【제목 규칙】
 - 핵심 원칙: 제품명이 아닌 "사용 상황 또는 문제" 중심으로 작성
 - 검색 키워드를 제목 앞에 배치
@@ -1254,29 +1322,44 @@ ${transcript}`;
   ② 이 영상에서만 들을 수 있는 구체 정보 3~5개 (숫자, 기간, 조건, 사례, 주의사항, 불이익 등 스크립트에 실제 등장한 것만)
   ③ 이 영상이 정확히 누구의 어떤 상황을 위한 것인지 (예: "가족에게 약국을 넘기려는 원장")
 2단계: 1단계에서 추출한 재료만 사용해서 제목·썸네일·설명란·해시태그를 만든다.
-
+${searchSection}
 【구체성 규칙 — 가장 중요】
 - 제목 앞부분 키워드는 반드시 1단계 ①의 세부 주제를 그대로 사용 (상위 포괄 주제로 뭉개지 말 것)
 - 제목 3개 중 최소 2개에는 1단계 ②의 구체 정보(숫자·조건·불이익 등)를 직접 포함
 - 스크립트에 없는 내용을 지어내지 말 것. "완전정리", "총정리", "모든 것" 같은 일반 문구만으로 제목을 채우지 말 것
 
+【실제 채널 성과 데이터 — 제목 작성의 최우선 기준 (2026.05 측정)】
+이 채널에서 실제로 클릭률이 높았던 제목 패턴 (반드시 이 패턴을 따를 것):
+- 호기심 질문형: "[실제 영상 제목 제거]" → 클릭률 [수치 제거]
+- 구체 숫자형: "[실제 영상 제목 제거]" → 클릭률 [수치 제거]
+- 실제 사례+금액형: "[실제 영상 제목 제거]" → 클릭률 [수치 제거]
+실제로 클릭률이 낮았던 패턴 (절대 따라하지 말 것):
+- 포괄 정리형: "[실제 영상 제목 제거]" → 클릭률 [수치 제거] (채널 최하위권)
+- 제도 소개·안내형 제목 전반
+
 【제목 규칙】
-- 형식: "핵심주제 완전정리 | 부연설명 또는 시청해야 할 이유"
-- 파이프( | )로 앞뒤 구분
-- 앞부분: 1단계 ①의 세부 주제 키워드 포함, 완전정리/총정리/해야할까 등 명확한 액션
-- 뒷부분: 1단계 ②의 구체 세부 내용 나열 또는 "약사님이 꼭 알아야 할 것"류 문구
+- 3개를 서로 다른 역할로 구성:
+  · 제목1 = 검색 노출용: 1단계 ①의 세부 주제 검색 키워드를 맨 앞에 배치 + 파이프( | ) 뒤에 구체 정보
+  · 제목2 = 클릭용(숫자형): 1단계 ②의 숫자·금액·기간을 제목 앞부분에 직접 노출
+  · 제목3 = 클릭용(질문형): 1단계 ②의 불이익·위험을 호기심 질문으로 ("~하면 어떻게 될까?", "~증여세 낼까?")
+- 모든 제목에 1단계 ①의 세부 주제 키워드 포함 (상위 포괄 주제로 뭉개지 말 것)
+- 숫자 정확성 (세무 콘텐츠라 틀리면 채널 신뢰도 추락):
+  · 스크립트에 없는 금액·숫자를 절대 만들어내지 말 것
+  · 스크립트의 숫자를 쓸 때 조건의 의미를 바꾸지 말 것 (예: "시가보다 30% 이상 낮게"를 "30% 할인하면"으로 단순화 금지)
+  · 제목에 쓴 숫자가 [핵심포인트]의 내용과 다르면 그 제목은 실패작
 - 글자 수: 반드시 30자 이상 60자 이하 (유튜브 검색 결과에서 60자 이후 잘림)
-- 실제 예시: "약국 권리금 세 총정리, 원천세·소득세·건보료 협의 범위는? | 쉽고 빠르게 알아보는 약국 권리금 Ep.2편"
-- 좋은 예 (세부 주제+구체 정보): "가족 간 약국 양수도, 시가보다 싸게 넘기면 증여세? | 특수관계자 거래 전 필수 확인 3가지"
-- 나쁜 예 (포괄적): "약국 양수도 완전정리 | 인수 전 반드시 알아야 할 모든 것"
+- "완전정리", "총정리", "모든 것"은 위 성과 데이터상 클릭률 최하위 문구이므로 사용 금지
 
 【썸네일 제목 규칙】
+- 썸네일 글씨는 검색 로봇이 읽지 못한다. 검색용이 아니라 100% "클릭 설득"용이다. 키워드 나열 금지, 사람 마음을 움직이는 문장으로
 - 반드시 2줄로 구성
-- 윗줄(보조): 상황 설정 또는 질문 (짧게, 10~20자)
-- 아랫줄(주): 핵심 키워드나 임팩트 문장 (굵게 보여야 하므로 6~12자)
+- 윗줄(보조): 타겟 시청자의 상황을 호명 (짧게, 10~20자. 예: "가족에게 약국 넘길 예정이라면")
+- 아랫줄(주): 손익·경고·숫자로 찌르는 임팩트 (굵게 보여야 하므로 6~12자. 예: "증여세 폭탄?")
+- 3개를 서로 다른 유형으로: ①경고형(불이익 강조) ②숫자형(금액·기간 강조) ③질문형(호기심 유발)
+- 스크립트에 금액·숫자가 있으면 최소 1개 썸네일의 아랫줄에 반드시 사용
+- 썸네일의 숫자도 제목과 동일하게 스크립트 원래 의미 그대로 (짧게 줄이다가 조건이 달라지면 안 됨. 예: "시가보다 3억 이상 낮게"를 "시가 3억 이하"로 바꾸면 틀린 정보)
 - 실제 예시: 윗줄 "변경된 정책, 약사님에겐 독?" / 아랫줄 "통합고용세액공제"
-- 실제 예시: 윗줄 "완천세, 종소세, 건보료..." / 아랫줄 "약국 권리금, 어디까지?"
-- 윗줄 또는 아랫줄 중 하나에는 1단계 ①·②의 구체 요소를 포함 ("이건 절대 놓치지 마세요"처럼 아무 영상에나 붙는 문구 2줄 금지)
+- 윗줄·아랫줄 모두 1단계 ①·②의 구체 요소 기반으로 ("이건 절대 놓치지 마세요"처럼 아무 영상에나 붙는 문구 금지)
 
 【설명란 규칙】
 - 첫 줄: 1단계 ①의 세부 주제 키워드를 반드시 포함 (유튜브 검색 결과 미리보기에 첫 2줄만 노출됨)
