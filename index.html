@@ -959,6 +959,12 @@
         return;
       }
 
+      // 저장 버튼을 깜빡해도 생성 시점에 자동 저장 (입력칸에만 있고 저장 안 된 경우)
+      if (localStorage.getItem('openai_api_key') !== apiKey) {
+        localStorage.setItem('openai_api_key', apiKey);
+        document.getElementById('api-status').textContent = '자동 저장됨 ✓';
+      }
+
       const hasFile = currentTab === 'file' && selectedFile;
       const hasText = currentTab === 'text' && document.getElementById('script-input').value.trim().length > 10;
       const hasTranscript = document.getElementById('transcript-area').style.display !== 'none'
