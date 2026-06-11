@@ -715,8 +715,8 @@
         </div>
       </div>
 
-      <!-- 썸네일 제목 -->
-      <div class="result-section">
+      <!-- 썸네일 제목 (지킴 전용 — 헬씨허브는 썸네일을 따로 만들지 않음) -->
+      <div class="result-section" id="thumbnail-section">
         <div class="result-header">
           <h3>썸네일 제목 3가지</h3>
           <div class="result-actions">
@@ -1065,14 +1065,15 @@
         image_url: { url: `data:image/jpeg;base64,${f}`, detail: 'low' }
       }));
 
+      // 1차: 화면에서 본 것을 글로 정리만 한다 (메타데이터 생성은 텍스트 경로와 동일하게 처리)
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: 'gpt-4o',
-          messages: [{ role: 'user', content: [{ type: 'text', text: buildVisionPrompt() }, ...imageContent] }],
-          temperature: 0.7,
-          max_tokens: 1200
+          messages: [{ role: 'user', content: [{ type: 'text', text: buildVisionAnalysisPrompt() }, ...imageContent] }],
+          temperature: 0.2,
+          max_tokens: 800
         })
       });
 
@@ -1084,62 +1085,28 @@
       }
 
       const data = await res.json();
-      const raw = data.choices[0].message.content;
+      const analysis = data.choices[0].message.content.trim();
 
-      setStep(2, 'done');
-      setStep(3, 'done');
-      parseAndShowResult(raw);
-      setUIGenerating(false);
+      // 분석 결과를 수정 가능한 텍스트로 표시 — AI가 화면을 잘못 봤으면 여기서 고치고 다시 생성
+      document.getElementById('transcript-area').style.display = 'block';
+      document.getElementById('transcript-text').value = analysis;
+
+      // 2차: 지킴과 동일한 SEO 생성 경로 (실제 검색어 조회 + 핵심포인트 포함)
+      await runGenerateMetadata(apiKey, analysis);
     }
 
-    function buildVisionPrompt() {
-      return `당신은 헬씨허브 유튜브 쇼츠 채널 메타데이터 전문가입니다.
-헬씨허브는 의약외품(밴드류, 수면용품, 반려동물용품 등 OEM) 브랜드입니다. 시청자는 일반 소비자입니다.
+    function buildVisionAnalysisPrompt() {
+      return `당신은 영상 분석 전문가입니다. 첨부된 이미지들은 한 유튜브 쇼츠 영상에서 순서대로 캡처한 화면 4장입니다.
+영상은 의약외품(밴드류, 수면용품, 반려동물용품 등) 브랜드 헬씨허브의 홍보 쇼츠입니다.
 
-첨부된 영상 프레임 이미지들을 분석해서 메타데이터를 생성해주세요.
-분석 시 파악할 것:
-- 어떤 제품이 등장하는가 (제품명, 종류)
-- 어떤 상황이나 문제를 보여주는가 (사용 상황, 해결하는 문제)
-- 화면에 표시된 텍스트 (자막, 제품명, 설명 등)
-- 영상의 핵심 메시지
+화면에서 실제로 보이는 것만 정리해주세요 (추측해서 지어내지 말 것):
+- 등장하는 제품: 제품명, 종류, 생김새
+- 화면에 적힌 글자 전부: 자막, 문구, 제품 포장의 글자를 보이는 그대로 옮기기
+- 보여주는 상황: 어떤 문제 상황이고 제품을 어떻게 사용하는지
+- 영상의 핵심 메시지: 이 영상이 시청자에게 말하려는 것
+- 타겟 시청자: 누구의 어떤 상황을 위한 영상인지
 
-【제목 규칙】
-- 핵심 원칙: 제품명이 아닌 "사용 상황 또는 문제" 중심으로 작성
-- 검색 키워드를 제목 앞에 배치
-- 글자 수: 반드시 30자 이상 60자 이하
-- 잘 되는 패턴:
-  · "~하는 분들 이거 보세요"
-  · "~할 때 이거면 됩니다"
-  · "~없애는 법 찾다가 발견한 ~"
-  · "~해결하는 법"
-- 실제 예시: "저자극 반창고" → "반창고 뗄 때 아픈 분들 이거 보세요"
-
-【썸네일 제목 규칙】
-- 10자 이내, 강한 임팩트, 검색 키워드나 해결책 중심
-
-【설명란 규칙】
-- 첫 줄: 핵심 검색 키워드를 반드시 포함
-- 두 번째 줄: 제품의 핵심 특징 1가지
-- 세 번째 줄: 추가 특징 또는 사용 대상
-- 빈 줄 하나
-- 마지막: "▶ 구매하기\\n[스마트스토어 링크]\\n[쿠팡 링크]"
-
-【태그 규칙】
-- 순서 중요: 앞 3개가 가장 핵심 검색어
-- 넓은 태그 2~3개 + 중간 태그 3~4개 + 좁은 태그 3~4개 + 사용 대상 1~2개
-- 고정 태그: #의약외품 #shorts 반드시 포함
-- 총 10~15개 (절대 초과 금지)
-
-아래 형식으로 정확히 출력해주세요:
-
-[제목1] (사용 상황/문제 중심)
-[제목2]
-[제목3]
-[썸네일1] (10자 이내)
-[썸네일2] (10자 이내)
-[썸네일3] (10자 이내)
-[설명란] (첫 3줄 핵심 특징+SEO키워드, 빈 줄, 구매하기 링크 자리)
-[해시태그] (#의약외품 #shorts 반드시 포함, 총 10~15개 공백으로 구분)`;
+설명 문장으로 자연스럽게 정리해주세요. 대괄호 [ ] 는 사용하지 마세요.`;
     }
 
     // ── 1단계: 영상 → 텍스트 변환 ────────────────────────
@@ -1288,7 +1255,7 @@ ${found.map(d => `- "${d.keyword}" 입력 시 추천: ${d.suggestions.join(' / '
 
 【작업 순서 — 반드시 이 순서로】
 1단계: 스크립트를 먼저 분석해서 ① 이 영상의 정확한 세부 주제(포괄 주제 금지), ② 영상에 실제 등장한 구체 정보 3~5개(상황, 대상, 효과, 사용법, 숫자), ③ 정확히 누구의 어떤 상황을 위한 영상인지 추출한다.
-2단계: 1단계에서 추출한 재료만 사용해서 제목·썸네일·설명란·해시태그를 만든다. 스크립트에 없는 내용을 지어내지 말 것.
+2단계: 1단계에서 추출한 재료만 사용해서 제목·설명란·해시태그를 만든다. 스크립트에 없는 내용을 지어내지 말 것. (썸네일은 만들지 않는다)
 ${searchSection}
 【제목 규칙】
 - 핵심 원칙: 제품명이 아닌 "사용 상황 또는 문제" 중심으로 작성
@@ -1304,10 +1271,6 @@ ${searchSection}
   · "저자극 반창고" → "반창고 뗄 때 아픈 분들 이거 보세요"
   · "코골이 방지밴드" → "코골이 없애는 법 찾다가 발견한 밴드"
   · "니플패치" → "러닝할 때 니플 쓸림 해결하는 법"
-
-【썸네일 제목 규칙】
-- 10자 이내, 강한 임팩트
-- 검색 키워드나 해결책 중심
 
 【설명란 규칙】
 - 첫 줄: 핵심 검색 키워드를 반드시 포함 (유튜브 검색 결과 미리보기에 첫 2줄만 노출됨)
@@ -1332,9 +1295,6 @@ ${searchSection}
 [제목1] (사용 상황/문제 중심, 검색 키워드 앞 배치)
 [제목2]
 [제목3]
-[썸네일1] (10자 이내)
-[썸네일2] (10자 이내)
-[썸네일3] (10자 이내)
 [설명란] (첫 3줄 핵심 특징+SEO키워드, 빈 줄, "▶ 구매하기\n[스마트스토어 링크]\n[쿠팡 링크]")
 [해시태그] (#의약외품 #shorts 반드시 포함, 총 10~15개 공백으로 구분)
 
@@ -1446,16 +1406,14 @@ ${transcript}`;
 
       if (currentChannel === 'jeekim') {
         // 지킴: 2줄 썸네일
+        document.getElementById('thumbnail-section').style.display = 'block';
         for (let i = 1; i <= 3; i++) {
           document.getElementById(`thumb-${i}-top`).textContent = get(`썸네일${i}_윗줄`);
           document.getElementById(`thumb-${i}-bottom`).textContent = get(`썸네일${i}_아랫줄`);
         }
       } else {
-        // 헬씨허브: 단일 줄 (기존 방식, 윗줄에만 표시)
-        for (let i = 1; i <= 3; i++) {
-          document.getElementById(`thumb-${i}-top`).textContent = '';
-          document.getElementById(`thumb-${i}-bottom`).textContent = get(`썸네일${i}`);
-        }
+        // 헬씨허브: 썸네일을 따로 제작하지 않으므로 구역 자체를 숨김
+        document.getElementById('thumbnail-section').style.display = 'none';
       }
 
       document.getElementById('result-description').textContent = get('설명란');
@@ -1498,10 +1456,10 @@ ${transcript}`;
       const apiKey = getApiKey();
       if (!apiKey) { showError('API 키를 먼저 설정해주세요.'); return; }
 
-      const useVision = currentChannel === 'healthyhub' && lastFrames.length > 0;
+      // 헬씨허브 영상도 1차 분석 결과가 "변환된 텍스트" 칸에 들어 있으므로 항상 텍스트 경로로 재생성
       const transcript = document.getElementById('transcript-text').value.trim()
         || document.getElementById('script-input').value.trim();
-      if (!useVision && !transcript) { showError('스크립트가 없어요. 영상을 다시 분석해주세요.'); return; }
+      if (!transcript) { showError('스크립트가 없어요. 영상을 다시 분석해주세요.'); return; }
 
       const btn = document.querySelector(`[onclick="regenSection('${section}')"]`);
       const original = btn.textContent;
@@ -1520,33 +1478,15 @@ ${transcript}`;
           hashtag: '해시태그만 다시 생성해주세요. [해시태그] 형식으로만 출력.'
         };
 
-        let res;
-        if (useVision) {
-          const imageContent = lastFrames.map(f => ({
-            type: 'image_url',
-            image_url: { url: `data:image/jpeg;base64,${f}`, detail: 'low' }
-          }));
-          res = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: 'gpt-4o',
-              messages: [{ role: 'user', content: [{ type: 'text', text: buildVisionPrompt() + '\n\n' + extraInstruction[section] }, ...imageContent] }],
-              temperature: 0.9,
-              max_tokens: 600
-            })
-          });
-        } else {
-          res = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: 'gpt-4o-mini',
-              messages: [{ role: 'user', content: buildPrompt(transcript) + '\n\n' + extraInstruction[section] }],
-              temperature: 0.7
-            })
-          });
-        }
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: buildPrompt(transcript) + '\n\n' + extraInstruction[section] }],
+            temperature: 0.7
+          })
+        });
 
         if (!res.ok) {
           const err = await res.json();
@@ -1892,15 +1832,21 @@ ${transcript}`;
       const date = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
 
       const titles = [1,2,3].map(i => `${i}. ${document.getElementById('title-'+i).textContent}`).join('\n');
-      const thumbs = [1,2,3].map(i => {
-        const top = document.getElementById(`thumb-${i}-top`).textContent;
-        const bot = document.getElementById(`thumb-${i}-bottom`).textContent;
-        return `${i}. ${top ? top + ' / ' : ''}${bot}`;
-      }).join('\n');
       const desc = document.getElementById('result-description').textContent;
       const tags = Array.from(document.querySelectorAll('#result-hashtag .hashtag')).map(el => el.textContent).join(' ');
 
-      const content = `[${ch}] 유튜브 메타데이터\n생성일: ${date}\n\n============================\n제목 후보\n============================\n${titles}\n\n============================\n썸네일 제목\n============================\n${thumbs}\n\n============================\n설명란\n============================\n${desc}\n\n============================\n해시태그\n============================\n${tags}\n`;
+      // 썸네일은 지킴만 (헬씨허브는 따로 제작하지 않음)
+      let thumbBlock = '';
+      if (currentChannel === 'jeekim') {
+        const thumbs = [1,2,3].map(i => {
+          const top = document.getElementById(`thumb-${i}-top`).textContent;
+          const bot = document.getElementById(`thumb-${i}-bottom`).textContent;
+          return `${i}. ${top ? top + ' / ' : ''}${bot}`;
+        }).join('\n');
+        thumbBlock = `============================\n썸네일 제목\n============================\n${thumbs}\n\n`;
+      }
+
+      const content = `[${ch}] 유튜브 메타데이터\n생성일: ${date}\n\n============================\n제목 후보\n============================\n${titles}\n\n${thumbBlock}============================\n설명란\n============================\n${desc}\n\n============================\n해시태그\n============================\n${tags}\n`;
 
       const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
