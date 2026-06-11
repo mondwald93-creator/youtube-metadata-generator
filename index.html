@@ -170,6 +170,7 @@
     }
     .upload-area:hover { border-color: #444; background: #1a1a1a; }
     .upload-area.has-file { border-color: #444; border-style: solid; background: #1a1a1a; }
+    .upload-area.drag-over { border-color: #ff4444; background: #1f1414; }
 
     .upload-icon { font-size: 36px; margin-bottom: 12px; }
     .upload-area h3 { font-size: 15px; color: #ccc; margin-bottom: 6px; }
@@ -177,7 +178,6 @@
     .upload-area input[type="file"] { display: none; }
 
     .file-info {
-      display: none;
       padding: 12px 16px;
       background: #1a1a1a;
       border: 1px solid #2a2a2a;
@@ -547,6 +547,27 @@
       transition: all 0.15s;
     }
     .history-clear-btn:hover { color: #ff8888; border-color: #5a2a2a; }
+
+    .char-count {
+      font-size: 11px;
+      margin-top: 5px;
+      padding-left: 28px;
+    }
+    .char-count.ok { color: #6adf6a; }
+    .char-count.warn { color: #ff8844; }
+
+    .reset-btn {
+      padding: 12px 28px;
+      background: none;
+      border: 1px solid #333;
+      border-radius: 8px;
+      color: #666;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-left: 12px;
+    }
+    .reset-btn:hover { background: #1a1a1a; color: #ccc; }
   </style>
 </head>
 <body>
@@ -597,7 +618,7 @@
       <label class="upload-area" for="file-input" id="upload-label">
         <div class="upload-icon">🎬</div>
         <h3>영상 파일을 여기에 끌어다 놓거나 클릭해서 선택</h3>
-        <p>MP4, MOV, AVI, MP3 · 최대 25MB · 10분 기준 처리비용 약 100~150원</p>
+        <p id="upload-desc">MP4, MOV, AVI, MP3 · 최대 25MB · 10분 기준 처리비용 약 100~150원</p>
         <input type="file" id="file-input" accept="video/*,audio/*" onchange="handleFileSelect(this)">
       </label>
       <div class="file-info" id="file-info" style="display:none;">
@@ -660,9 +681,18 @@
           </div>
         </div>
         <div class="result-body">
-          <div class="result-item title-row"><div class="item-num">01</div><div class="result-text" id="title-1"></div><button class="use-btn" id="use-btn-1" onclick="markUsed(1)">✓ 이걸 사용했어요</button></div>
-          <div class="result-item title-row"><div class="item-num">02</div><div class="result-text" id="title-2"></div><button class="use-btn" id="use-btn-2" onclick="markUsed(2)">✓ 이걸 사용했어요</button></div>
-          <div class="result-item title-row"><div class="item-num">03</div><div class="result-text" id="title-3"></div><button class="use-btn" id="use-btn-3" onclick="markUsed(3)">✓ 이걸 사용했어요</button></div>
+          <div class="result-item">
+            <div class="title-row"><div class="item-num">01</div><div class="result-text" id="title-1"></div><button class="use-btn" id="use-btn-1" onclick="markUsed(1)">✓ 이걸 사용했어요</button></div>
+            <div class="char-count" id="char-count-1"></div>
+          </div>
+          <div class="result-item">
+            <div class="title-row"><div class="item-num">02</div><div class="result-text" id="title-2"></div><button class="use-btn" id="use-btn-2" onclick="markUsed(2)">✓ 이걸 사용했어요</button></div>
+            <div class="char-count" id="char-count-2"></div>
+          </div>
+          <div class="result-item">
+            <div class="title-row"><div class="item-num">03</div><div class="result-text" id="title-3"></div><button class="use-btn" id="use-btn-3" onclick="markUsed(3)">✓ 이걸 사용했어요</button></div>
+            <div class="char-count" id="char-count-3"></div>
+          </div>
         </div>
       </div>
 
@@ -724,6 +754,7 @@
 
       <div class="download-bar" id="download-bar">
         <button class="download-btn" onclick="downloadResult()">전체 텍스트 파일로 저장</button>
+        <button class="reset-btn" onclick="resetAll()">새 영상 시작하기</button>
       </div>
     </div>
 
@@ -746,6 +777,7 @@
     let currentTab = 'file';
     let selectedFile = null;
     let lastTranscript = '';
+    let lastFrames = [];
 
     // ── 초기화 ──────────────────────────────────────────
     window.onload = () => {
@@ -795,6 +827,10 @@
       currentChannel = ch;
       document.getElementById('btn-healthyhub').className = 'channel-btn' + (ch === 'healthyhub' ? ' active' : '');
       document.getElementById('btn-jeekim').className = 'channel-btn jeekim' + (ch === 'jeekim' ? ' active' : '');
+      document.getElementById('upload-desc').textContent = ch === 'healthyhub'
+        ? 'MP4, MOV · 용량 무관 · 화면 자동 분석 (약 200~500원/영상)'
+        : 'MP4, MOV, AVI, MP3 · 최대 25MB · 10분 기준 처리비용 약 100~150원';
+      if (selectedFile) processFile(selectedFile);
     }
 
     // ── 탭 전환 ──────────────────────────────────────────
@@ -834,23 +870,45 @@
     // ── 파일 선택 ────────────────────────────────────────
     function handleFileSelect(input) {
       if (!input.files || !input.files[0]) return;
-      selectedFile = input.files[0];
-      const sizeMB = (selectedFile.size / 1024 / 1024).toFixed(1);
+      processFile(input.files[0]);
+    }
+
+    function processFile(file) {
+      const sizeMB = (file.size / 1024 / 1024).toFixed(1);
       const fileInfo = document.getElementById('file-info');
       fileInfo.style.display = 'flex';
-      document.getElementById('file-name').textContent = selectedFile.name;
+      document.getElementById('file-name').textContent = file.name;
       document.getElementById('file-size').textContent = sizeMB + 'MB';
 
       const warn = document.getElementById('size-warn');
-      if (selectedFile.size > 25 * 1024 * 1024) {
+      if (currentChannel !== 'healthyhub' && file.size > 25 * 1024 * 1024) {
         warn.textContent = '⚠ 25MB 초과 — 스크립트 직접 입력 탭을 사용해주세요';
         selectedFile = null;
       } else {
         warn.textContent = '';
+        selectedFile = file;
         document.getElementById('upload-label').classList.add('has-file');
       }
       document.getElementById('transcript-area').style.display = 'none';
     }
+
+    // ── 드래그 앤 드롭 ───────────────────────────────────
+    window.addEventListener('DOMContentLoaded', () => {
+      const label = document.getElementById('upload-label');
+      label.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        label.classList.add('drag-over');
+      });
+      label.addEventListener('dragleave', () => {
+        label.classList.remove('drag-over');
+      });
+      label.addEventListener('drop', (e) => {
+        e.preventDefault();
+        label.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file) processFile(file);
+      });
+    });
 
     // ── 메인 흐름 ────────────────────────────────────────
     async function startFlow() {
@@ -880,9 +938,13 @@
           transcript = document.getElementById('transcript-text').value.trim();
           await runGenerateMetadata(apiKey, transcript);
         } else if (hasFile) {
-          transcript = await runTranscribe(apiKey);
-          if (!transcript) return;
-          await runGenerateMetadata(apiKey, transcript);
+          if (currentChannel === 'healthyhub') {
+            await runAnalyzeVideo(apiKey, selectedFile);
+          } else {
+            transcript = await runTranscribe(apiKey);
+            if (!transcript) return;
+            await runGenerateMetadata(apiKey, transcript);
+          }
         } else {
           transcript = document.getElementById('script-input').value.trim();
           await runGenerateMetadata(apiKey, transcript);
@@ -891,6 +953,152 @@
         setUIGenerating(false);
         showError('오류가 발생했어요: ' + e.message);
       }
+    }
+
+    // ── 헬씨허브 전용: 화면 캡처 + 비전 분석 ──────────────
+    async function extractFrames(file, count = 4) {
+      return new Promise((resolve, reject) => {
+        const video = document.createElement('video');
+        const objectUrl = URL.createObjectURL(file);
+        video.src = objectUrl;
+        video.muted = true;
+        video.preload = 'metadata';
+
+        video.addEventListener('error', () => {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error('영상 파일을 읽을 수 없어요. MP4 또는 MOV 파일인지 확인해주세요.'));
+        });
+
+        video.addEventListener('loadedmetadata', async () => {
+          try {
+            const duration = video.duration;
+            const maxWidth = 480;
+            const scale = Math.min(1, maxWidth / video.videoWidth);
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(video.videoWidth * scale);
+            canvas.height = Math.round(video.videoHeight * scale);
+            const ctx = canvas.getContext('2d');
+            const frames = [];
+
+            for (let i = 0; i < count; i++) {
+              const time = duration * (i + 1) / (count + 1);
+              await new Promise(res => {
+                video.addEventListener('seeked', res, { once: true });
+                video.currentTime = time;
+              });
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              frames.push(canvas.toDataURL('image/jpeg', 0.65).split(',')[1]);
+            }
+
+            URL.revokeObjectURL(objectUrl);
+            resolve(frames);
+          } catch(e) {
+            URL.revokeObjectURL(objectUrl);
+            reject(e);
+          }
+        });
+
+        video.load();
+      });
+    }
+
+    async function runAnalyzeVideo(apiKey, file) {
+      setStep(1, 'active');
+
+      let frames;
+      try {
+        frames = await extractFrames(file, 4);
+      } catch(e) {
+        setUIGenerating(false);
+        showError('영상 화면 캡처 실패: ' + e.message);
+        return;
+      }
+
+      lastFrames = frames;
+      setStep(1, 'done');
+      setStep(2, 'active');
+      setStep(3, 'active');
+
+      const imageContent = frames.map(f => ({
+        type: 'image_url',
+        image_url: { url: `data:image/jpeg;base64,${f}`, detail: 'low' }
+      }));
+
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          messages: [{ role: 'user', content: [{ type: 'text', text: buildVisionPrompt() }, ...imageContent] }],
+          temperature: 0.7,
+          max_tokens: 1200
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        setUIGenerating(false);
+        showError('화면 분석 실패: ' + (err.error?.message || '알 수 없는 오류'));
+        return;
+      }
+
+      const data = await res.json();
+      const raw = data.choices[0].message.content;
+
+      setStep(2, 'done');
+      setStep(3, 'done');
+      parseAndShowResult(raw);
+      setUIGenerating(false);
+    }
+
+    function buildVisionPrompt() {
+      return `당신은 헬씨허브 유튜브 쇼츠 채널 메타데이터 전문가입니다.
+헬씨허브는 의약외품(밴드류, 수면용품, 반려동물용품 등 OEM) 브랜드입니다. 시청자는 일반 소비자입니다.
+
+첨부된 영상 프레임 이미지들을 분석해서 메타데이터를 생성해주세요.
+분석 시 파악할 것:
+- 어떤 제품이 등장하는가 (제품명, 종류)
+- 어떤 상황이나 문제를 보여주는가 (사용 상황, 해결하는 문제)
+- 화면에 표시된 텍스트 (자막, 제품명, 설명 등)
+- 영상의 핵심 메시지
+
+【제목 규칙】
+- 핵심 원칙: 제품명이 아닌 "사용 상황 또는 문제" 중심으로 작성
+- 검색 키워드를 제목 앞에 배치
+- 글자 수: 반드시 30자 이상 60자 이하
+- 잘 되는 패턴:
+  · "~하는 분들 이거 보세요"
+  · "~할 때 이거면 됩니다"
+  · "~없애는 법 찾다가 발견한 ~"
+  · "~해결하는 법"
+- 실제 예시: "저자극 반창고" → "반창고 뗄 때 아픈 분들 이거 보세요"
+
+【썸네일 제목 규칙】
+- 10자 이내, 강한 임팩트, 검색 키워드나 해결책 중심
+
+【설명란 규칙】
+- 첫 줄: 핵심 검색 키워드를 반드시 포함
+- 두 번째 줄: 제품의 핵심 특징 1가지
+- 세 번째 줄: 추가 특징 또는 사용 대상
+- 빈 줄 하나
+- 마지막: "▶ 구매하기\\n[스마트스토어 링크]\\n[쿠팡 링크]"
+
+【태그 규칙】
+- 순서 중요: 앞 3개가 가장 핵심 검색어
+- 넓은 태그 2~3개 + 중간 태그 3~4개 + 좁은 태그 3~4개 + 사용 대상 1~2개
+- 고정 태그: #의약외품 #shorts 반드시 포함
+- 총 10~15개 (절대 초과 금지)
+
+아래 형식으로 정확히 출력해주세요:
+
+[제목1] (사용 상황/문제 중심)
+[제목2]
+[제목3]
+[썸네일1] (10자 이내)
+[썸네일2] (10자 이내)
+[썸네일3] (10자 이내)
+[설명란] (첫 3줄 핵심 특징+SEO키워드, 빈 줄, 구매하기 링크 자리)
+[해시태그] (#의약외품 #shorts 반드시 포함, 총 10~15개 공백으로 구분)`;
     }
 
     // ── 1단계: 영상 → 텍스트 변환 ────────────────────────
@@ -1084,9 +1292,11 @@ ${transcript}`;
         return m ? m[1].trim() : '';
       };
 
-      document.getElementById('title-1').textContent = get('제목1');
-      document.getElementById('title-2').textContent = get('제목2');
-      document.getElementById('title-3').textContent = get('제목3');
+      [1,2,3].forEach(i => {
+        const t = get('제목' + i);
+        document.getElementById('title-' + i).textContent = t;
+        updateCharCount(i, t);
+      });
 
       if (currentChannel === 'jeekim') {
         // 지킴: 2줄 썸네일
@@ -1128,33 +1338,61 @@ ${transcript}`;
       const apiKey = getApiKey();
       if (!apiKey) { showError('API 키를 먼저 설정해주세요.'); return; }
 
+      const useVision = currentChannel === 'healthyhub' && lastFrames.length > 0;
       const transcript = document.getElementById('transcript-text').value.trim()
         || document.getElementById('script-input').value.trim();
-      if (!transcript) { showError('스크립트가 없어요. 영상을 다시 분석해주세요.'); return; }
+      if (!useVision && !transcript) { showError('스크립트가 없어요. 영상을 다시 분석해주세요.'); return; }
 
-      const sectionNames = { title: '제목', thumbnail: '썸네일 제목', description: '설명란', hashtag: '해시태그' };
       const btn = document.querySelector(`[onclick="regenSection('${section}')"]`);
       const original = btn.textContent;
       btn.textContent = '생성 중...';
       btn.disabled = true;
 
       try {
+        const thumbnailInstruction = currentChannel === 'jeekim'
+          ? '썸네일 제목 3가지만 다시 생성해주세요. [썸네일1_윗줄] [썸네일1_아랫줄] [썸네일2_윗줄] [썸네일2_아랫줄] [썸네일3_윗줄] [썸네일3_아랫줄] 형식으로만 출력.'
+          : '썸네일 제목 3가지만 다시 생성해주세요. [썸네일1] [썸네일2] [썸네일3] 형식으로만 출력.';
+
         const extraInstruction = {
           title: '제목 3가지만 다시 생성해주세요. [제목1] [제목2] [제목3] 형식으로만 출력.',
-          thumbnail: '썸네일 제목 3가지만 다시 생성해주세요. [썸네일1] [썸네일2] [썸네일3] 형식으로만 출력.',
+          thumbnail: thumbnailInstruction,
           description: '설명란만 다시 생성해주세요. [설명란] 형식으로만 출력.',
           hashtag: '해시태그만 다시 생성해주세요. [해시태그] 형식으로만 출력.'
         };
 
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [{ role: 'user', content: buildPrompt(transcript) + '\n\n' + extraInstruction[section] }],
-            temperature: 0.9
-          })
-        });
+        let res;
+        if (useVision) {
+          const imageContent = lastFrames.map(f => ({
+            type: 'image_url',
+            image_url: { url: `data:image/jpeg;base64,${f}`, detail: 'low' }
+          }));
+          res = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gpt-4o',
+              messages: [{ role: 'user', content: [{ type: 'text', text: buildVisionPrompt() + '\n\n' + extraInstruction[section] }, ...imageContent] }],
+              temperature: 0.9,
+              max_tokens: 600
+            })
+          });
+        } else {
+          res = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gpt-4o-mini',
+              messages: [{ role: 'user', content: buildPrompt(transcript) + '\n\n' + extraInstruction[section] }],
+              temperature: 0.9
+            })
+          });
+        }
+
+        if (!res.ok) {
+          const err = await res.json();
+          showError('다시 생성 실패: ' + (err.error?.message || '알 수 없는 오류'));
+          return;
+        }
 
         const data = await res.json();
         const raw = data.choices[0].message.content;
@@ -1163,14 +1401,30 @@ ${transcript}`;
           const lines = raw.match(/\[제목\d\]\s*([^\[]+)/gi) || [];
           lines.forEach((l, i) => {
             const m = l.match(/\[제목\d\]\s*(.+)/i);
-            if (m) document.getElementById('title-' + (i+1)).textContent = m[1].trim();
+            if (m) {
+              const t = m[1].trim();
+              document.getElementById('title-' + (i+1)).textContent = t;
+              updateCharCount(i+1, t);
+            }
           });
         } else if (section === 'thumbnail') {
-          const lines = raw.match(/\[썸네일\d\]\s*([^\[]+)/gi) || [];
-          lines.forEach((l, i) => {
-            const m = l.match(/\[썸네일\d\]\s*(.+)/i);
-            if (m) document.getElementById('thumb-' + (i+1)).textContent = m[1].trim();
-          });
+          if (currentChannel === 'jeekim') {
+            for (let i = 1; i <= 3; i++) {
+              const top = raw.match(new RegExp(`\\[썸네일${i}_윗줄\\]\\s*([^\\[]+)`, 'i'));
+              const bot = raw.match(new RegExp(`\\[썸네일${i}_아랫줄\\]\\s*([^\\[]+)`, 'i'));
+              if (top) document.getElementById(`thumb-${i}-top`).textContent = top[1].trim();
+              if (bot) document.getElementById(`thumb-${i}-bottom`).textContent = bot[1].trim();
+            }
+          } else {
+            const lines = raw.match(/\[썸네일\d\]\s*([^\[]+)/gi) || [];
+            lines.forEach((l, i) => {
+              const m = l.match(/\[썸네일\d\]\s*(.+)/i);
+              if (m) {
+                document.getElementById(`thumb-${i+1}-top`).textContent = '';
+                document.getElementById(`thumb-${i+1}-bottom`).textContent = m[1].trim();
+              }
+            });
+          }
         } else if (section === 'description') {
           const m = raw.match(/\[설명란\]\s*([\s\S]+)/i);
           if (m) document.getElementById('result-description').textContent = m[1].trim();
@@ -1194,8 +1448,20 @@ ${transcript}`;
       document.getElementById('generate-btn').style.display = on ? 'none' : 'block';
       document.getElementById('loading-area').style.display = on ? 'block' : 'none';
       if (on) {
-        ['step-1','step-2','step-3'].forEach(id => {
-          document.getElementById(id).className = 'loading-step';
+        const isVisionMode = currentChannel === 'healthyhub' && currentTab === 'file' && selectedFile;
+        const stepTexts = isVisionMode ? [
+          '① 영상 화면 캡처 중...',
+          '② 제품·상황 분석 중...',
+          '③ 제목·설명·태그 생성 중...'
+        ] : [
+          '① 영상 음성 텍스트로 변환 중...',
+          '② 핵심 키워드 분석 중...',
+          '③ 제목·설명·태그 생성 중...'
+        ];
+        ['step-1','step-2','step-3'].forEach((id, i) => {
+          const el = document.getElementById(id);
+          el.className = 'loading-step';
+          el.textContent = stepTexts[i];
         });
         if (currentTab === 'text' || document.getElementById('transcript-area').style.display !== 'none') {
           setStep(1, 'done');
@@ -1246,6 +1512,44 @@ ${transcript}`;
         btn.classList.add('copied');
         setTimeout(() => { btn.textContent = '복사'; btn.classList.remove('copied'); }, 2000);
       });
+    }
+
+    // ── 제목 글자 수 ─────────────────────────────────────
+    function updateCharCount(i, text) {
+      const el = document.getElementById('char-count-' + i);
+      if (!el) return;
+      const len = text.length;
+      if (len === 0) { el.textContent = ''; el.className = 'char-count'; return; }
+      const ok = len >= 30 && len <= 60;
+      el.textContent = ok
+        ? `${len}자 ✓ 적정`
+        : len < 30 ? `${len}자 ⚠ 너무 짧음 (30자 이상)` : `${len}자 ⚠ 너무 길음 (60자 이하)`;
+      el.className = 'char-count ' + (ok ? 'ok' : 'warn');
+    }
+
+    // ── 초기화 ───────────────────────────────────────────
+    function resetAll() {
+      selectedFile = null;
+      lastTranscript = '';
+      lastFrames = [];
+
+      document.getElementById('file-input').value = '';
+      document.getElementById('file-info').style.display = 'none';
+      document.getElementById('upload-label').classList.remove('has-file');
+      document.getElementById('script-input').value = '';
+      document.getElementById('transcript-text').value = '';
+      document.getElementById('transcript-area').style.display = 'none';
+
+      document.getElementById('result-area').style.display = 'none';
+      document.getElementById('result-divider').style.display = 'none';
+      document.getElementById('download-bar').style.display = 'none';
+      document.getElementById('generate-btn').style.display = 'block';
+      document.getElementById('generate-btn').textContent = '메타데이터 생성하기';
+
+      [1,2,3].forEach(i => updateCharCount(i, ''));
+      hideError();
+      switchTab('file');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     // ── 해시태그 렌더링 ──────────────────────────────────
