@@ -823,6 +823,7 @@
     let currentTab = 'file';
     let jeekimFormat = 'long'; // 지킴 전용: 'long'(롱폼) 또는 'shorts'(쇼츠)
     let selectedFile = null;
+    let pickedFile = null; // 마지막으로 고른 파일 원본 (형식 토글 시 경고 재계산용)
     let lastTranscript = '';
     let lastFrames = [];
     let lastSearchData = []; // 유튜브 자동완성에서 가져온 실제 검색어 (다시 생성 시 재사용)
@@ -892,11 +893,15 @@
       currentChannel = ch;
       document.getElementById('btn-healthyhub').className = 'channel-btn' + (ch === 'healthyhub' ? ' active' : '');
       document.getElementById('btn-jeekim').className = 'channel-btn jeekim' + (ch === 'jeekim' ? ' active' : '');
-      document.getElementById('upload-desc').textContent = ch === 'healthyhub'
-        ? 'MP4, MOV · 용량 무관 · 화면 자동 분석 (약 200~500원/영상)'
-        : 'MP4, MOV, AVI, MP3 · 최대 25MB · 10분 기준 처리비용 약 100~150원';
+      if (ch === 'healthyhub') {
+        document.getElementById('upload-desc').textContent = 'MP4, MOV · 용량 무관 · 화면 자동 분석 (약 200~500원/영상)';
+      } else {
+        document.getElementById('upload-desc').textContent = jeekimFormat === 'shorts'
+          ? 'MP4, MOV, AVI, MP3 · 25MB 초과 시 화면 자동 분석 (약 200~500원/영상)'
+          : 'MP4, MOV, AVI, MP3 · 최대 25MB · 10분 기준 처리비용 약 100~150원';
+      }
       document.getElementById('jeekim-format').style.display = ch === 'jeekim' ? 'flex' : 'none';
-      if (selectedFile) processFile(selectedFile);
+      if (pickedFile) processFile(pickedFile);
     }
 
     // ── 지킴 영상 형식 선택 (롱폼/쇼츠) ──────────────────
@@ -904,6 +909,10 @@
       jeekimFormat = fmt;
       document.getElementById('fmt-long').classList.toggle('active', fmt === 'long');
       document.getElementById('fmt-shorts').classList.toggle('active', fmt === 'shorts');
+      document.getElementById('upload-desc').textContent = fmt === 'shorts'
+        ? 'MP4, MOV, AVI, MP3 · 25MB 초과 시 화면 자동 분석 (약 200~500원/영상)'
+        : 'MP4, MOV, AVI, MP3 · 최대 25MB · 10분 기준 처리비용 약 100~150원';
+      if (pickedFile) processFile(pickedFile); // 형식 바뀌면 용량 안내/경고 다시 계산
     }
 
     // ── 탭 전환 ──────────────────────────────────────────
@@ -947,6 +956,7 @@
     }
 
     function processFile(file) {
+      pickedFile = file;
       const sizeMB = (file.size / 1024 / 1024).toFixed(1);
       const fileInfo = document.getElementById('file-info');
       fileInfo.style.display = 'flex';
@@ -954,11 +964,16 @@
       document.getElementById('file-size').textContent = sizeMB + 'MB';
 
       const warn = document.getElementById('size-warn');
-      if (currentChannel !== 'healthyhub' && file.size > 25 * 1024 * 1024) {
+      const oversize = file.size > 25 * 1024 * 1024;
+      // 지킴 쇼츠는 25MB 초과 시 화면 캡처로 자동 분석 → 차단하지 않고 안내만
+      const jeekimShortsOversize = currentChannel === 'jeekim' && jeekimFormat === 'shorts' && oversize;
+      if (currentChannel !== 'healthyhub' && oversize && !jeekimShortsOversize) {
         warn.textContent = '⚠ 25MB 초과 — 스크립트 직접 입력 탭을 사용해주세요';
+        warn.style.color = '#ff8844';
         selectedFile = null;
       } else {
-        warn.textContent = '';
+        warn.textContent = jeekimShortsOversize ? 'ℹ 25MB 초과 — 화면 자동 분석으로 처리됩니다' : '';
+        warn.style.color = '#3b9eff';
         selectedFile = file;
         document.getElementById('upload-label').classList.add('has-file');
       }
@@ -1017,7 +1032,10 @@
           transcript = document.getElementById('transcript-text').value.trim();
           await runGenerateMetadata(apiKey, transcript);
         } else if (hasFile) {
-          if (currentChannel === 'healthyhub') {
+          // 헬씨허브는 항상 화면 캡처 분석. 지킴 쇼츠는 25MB 초과(소리 받아쓰기 불가)일 때만 캡처로 전환.
+          const jeekimShortsOversize = currentChannel === 'jeekim' && jeekimFormat === 'shorts'
+                                       && selectedFile.size > 25 * 1024 * 1024;
+          if (currentChannel === 'healthyhub' || jeekimShortsOversize) {
             await runAnalyzeVideo(apiKey, selectedFile);
           } else {
             transcript = await runTranscribe(apiKey);
@@ -1134,6 +1152,20 @@
     }
 
     function buildVisionAnalysisPrompt() {
+      if (currentChannel === 'jeekim') {
+        return `당신은 영상 분석 전문가입니다. 첨부된 이미지들은 한 유튜브 쇼츠 영상에서 순서대로 캡처한 화면 4장입니다.
+영상은 지킴 JEEKIM 채널의 약국 세무/회계 교육 쇼츠입니다. 시청자는 약사, 약국 원장님입니다.
+
+★ 이 영상의 핵심 정보(금액·기간·세율·한도·조건·불이익)는 화면 자막에 글자로 박혀 있습니다. 자막을 정확히 옮기는 것이 가장 중요합니다.
+
+화면에서 실제로 보이는 것만 정리해주세요 (추측해서 지어내지 말 것):
+- 화면에 적힌 글자 전부: 자막·제목·표·숫자를 보이는 그대로 한 글자도 바꾸지 말고 옮기기 (특히 금액·%·기간·"~까지/이하/초과" 같은 조건은 절대 바꾸지 말 것)
+- 이 쇼츠의 세부 주제: 어떤 세무/회계 상황을 다루는지 (포괄 주제 금지, 누구의 어떤 상황인지까지)
+- 핵심 메시지·결론: 이 영상이 시청자에게 알려주려는 것 (인정/불인정·가능/불가의 방향이 어느 쪽인지 화면 그대로)
+- 타겟 시청자: 누구의 어떤 상황을 위한 영상인지 (예: 가족에게 약국을 넘기려는 원장)
+
+설명 문장으로 자연스럽게 정리해주세요. 화면에 숫자·조건이 보이면 빠짐없이 포함하세요. 대괄호 [ ] 는 사용하지 마세요.`;
+      }
       return `당신은 영상 분석 전문가입니다. 첨부된 이미지들은 한 유튜브 쇼츠 영상에서 순서대로 캡처한 화면 4장입니다.
 영상은 의약외품(밴드류, 수면용품, 반려동물용품 등) 브랜드 헬씨허브의 홍보 쇼츠입니다.
 
