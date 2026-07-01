@@ -962,13 +962,31 @@
           + ':' + String(s).padStart(2, '0');
       };
       const cues = []; // [시작초(또는 null), 텍스트]
+      let markerStrong = false; // srt/vtt/sbv/csv시간칸처럼 확실한 자막 표식을 봤는가
+      let bareTimeCount = 0;    // "3:20" 같은 줄머리 시간(본문 오인 가능)을 몇 번 봤는가
+
+      // 쉼표가 큰따옴표 안에 있으면 칸을 쪼개지 않는 CSV 한 줄 분해기 (버그 3)
+      const splitCsv = (line) => {
+        const out = []; let cur = ''; let q = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (q) {
+            if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+            else cur += ch;
+          } else if (ch === '"') q = true;
+          else if (ch === ',') { out.push(cur); cur = ''; }
+          else cur += ch;
+        }
+        out.push(cur);
+        return out.map(c => c.trim());
+      };
 
       if (ext === 'csv') {
         // 표 형식: 각 줄에서 시간처럼 생긴 칸 + 나머지 글자 칸
         const headerWord = /^(시간|시작|종료|start|end|time|자막|텍스트|text|내용|대사|caption|subtitle|번호|no)$/i;
         norm.split('\n').forEach(line => {
           if (!line.trim()) return;
-          const cells = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+          const cells = splitCsv(line);
           if (cells.some(c => headerWord.test(c))) return; // 머리글 행 건너뜀
           let t = null; const texts = [];
           cells.forEach(c => {
@@ -978,7 +996,7 @@
             } else if (c) texts.push(c);
           });
           const text = texts.join(' ').trim();
-          if (text) cues.push([t, text]);
+          if (text) { cues.push([t, text]); if (t !== null) markerStrong = true; }
         });
       } else {
         // srt / vtt / sbv / txt 공통: 줄 단위로 시간표시를 찾아가며 훑기
@@ -992,21 +1010,26 @@
           let m;
           // 화살표형 (srt/vtt): 00:03:20,000 --> ...  또는 03:20.000 --> ...
           m = t.match(/^(?:(\d{1,2}):)?(\d{1,2}):(\d{1,2})[.,]\d+\s*-->/);
-          if (m) { pending = toSec(m[1] || 0, m[2], m[3]); return; }
+          if (m) { pending = toSec(m[1] || 0, m[2], m[3]); markerStrong = true; return; }
           // sbv형: 0:03:20.000,0:03:55.000
           m = t.match(/^(?:(\d{1,2}):)?(\d{1,2}):(\d{1,2})[.,]\d+\s*,\s*\d/);
-          if (m) { pending = toSec(m[1] || 0, m[2], m[3]); return; }
+          if (m) { pending = toSec(m[1] || 0, m[2], m[3]); markerStrong = true; return; }
           // 줄머리 시간 + 텍스트 (유튜브 대본 txt): "3:20 텍스트"
           m = t.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s+(\S.*)$/);
-          if (m) { const s = m[3] !== undefined ? toSec(m[1], m[2], m[3]) : toSec(0, m[1], m[2]); cues.push([s, m[4].trim()]); pending = null; return; }
+          if (m) { const s = m[3] !== undefined ? toSec(m[1], m[2], m[3]) : toSec(0, m[1], m[2]); cues.push([s, m[4].trim()]); bareTimeCount++; pending = null; return; }
           // 줄에 시간만 있는 경우
           m = t.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-          if (m) { pending = m[3] !== undefined ? toSec(m[1], m[2], m[3]) : toSec(0, m[1], m[2]); return; }
+          if (m) { pending = m[3] !== undefined ? toSec(m[1], m[2], m[3]) : toSec(0, m[1], m[2]); bareTimeCount++; return; }
           // 일반 텍스트 줄
           cues.push([pending, t]);
           pending = null;
         });
       }
+
+      // 버그 2 방지: 확실한 자막 표식(-->, sbv, csv 시간칸)이 없고 "3:20" 줄머리 시간이
+      // 본문에 어쩌다 섞인 정도(적은 비율)면 시간으로 신뢰하지 않고 내용형으로 처리한다.
+      const trustTime = markerStrong || (bareTimeCount >= 3 && bareTimeCount >= cues.length * 0.5);
+      if (!trustTime) cues.forEach(c => { c[0] = null; });
 
       const hasTime = cues.some(c => c[0] !== null && c[0] !== undefined);
       const clean = cues.map(c => c[1]).join(' ').replace(/\s+/g, ' ').trim();
@@ -1024,6 +1047,9 @@
         const { clean, timed, hasTime } = parseSubtitle(e.target.result, file.name);
         document.getElementById('script-input').value = clean;
         lastTimedTranscript = timed; // 시간정보 없으면 ''
+        // 직전 영상 변환 결과가 떠 있으면 비운다 — 그게 우선 채택돼 옛 대본+새 시간이 섞이는 것 방지
+        document.getElementById('transcript-area').style.display = 'none';
+        document.getElementById('transcript-text').value = '';
         const hint = document.getElementById('srt-hint');
         if (currentChannel === 'jeekim' && jeekimFormat === 'long') {
           hint.textContent = hasTime
@@ -1189,6 +1215,7 @@
 
     async function runAnalyzeVideo(apiKey, file) {
       setStep(1, 'active');
+      lastTimedTranscript = ''; // 화면 분석엔 줄별 시간정보가 없음 — 옛 자막 시간정보가 섞이지 않게 비움
 
       let frames;
       try {
@@ -1270,6 +1297,7 @@
     // ── 1단계: 영상 → 텍스트 변환 ────────────────────────
     async function runTranscribe(apiKey) {
       setStep(1, 'active');
+      lastTimedTranscript = ''; // 영상 받아쓰기엔 줄별 시간정보가 없음 — 옛 자막 시간정보가 섞이지 않게 비움
 
       const formData = new FormData();
       formData.append('file', selectedFile);
