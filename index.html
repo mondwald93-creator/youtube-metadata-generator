@@ -663,9 +663,9 @@
     <!-- 텍스트 입력 패널 -->
     <div id="panel-text" class="text-input-area">
       <div class="srt-bar">
-        <span class="srt-hint">스크립트를 붙여넣거나, 자막 파일(.srt)을 불러오세요</span>
-        <label class="srt-btn" for="srt-input">SRT 파일 불러오기</label>
-        <input type="file" id="srt-input" accept=".srt,.txt" onchange="loadSRT(this)" style="display:none;">
+        <span class="srt-hint" id="srt-hint">스크립트를 붙여넣거나, 자막 파일(.srt / .sbv / .vtt / .txt / .csv)을 불러오세요</span>
+        <label class="srt-btn" for="srt-input">자막 파일 불러오기</label>
+        <input type="file" id="srt-input" accept=".srt,.sbv,.vtt,.txt,.csv" onchange="loadSubtitle(this)" style="display:none;">
       </div>
       <textarea id="script-input" placeholder="영상 스크립트나 주요 내용을 여기에 붙여넣으세요.
 
@@ -798,6 +798,18 @@
         </div>
       </div>
 
+      <!-- 쇼츠 추천 구간 (지킴 롱폼일 때만) -->
+      <div class="result-section" id="shorts-section" style="display:none;">
+        <div class="result-header">
+          <h3>✂️ 쇼츠 추천 구간 <span class="keypoints-hint" id="shorts-hint">— 이 롱폼에서 쇼츠로 잘라 쓸 만한 구간</span></h3>
+          <div class="result-actions">
+            <button class="regen-btn" onclick="regenSection('shorts')">↺ 다시 생성</button>
+            <button class="copy-btn" id="copy-shorts" onclick="copySection('shorts')">복사</button>
+          </div>
+        </div>
+        <div class="result-body" id="result-shorts"></div>
+      </div>
+
       <div class="download-bar" id="download-bar">
         <button class="download-btn" onclick="downloadResult()">전체 텍스트 파일로 저장</button>
         <button class="reset-btn" onclick="resetAll()">새 영상 시작하기</button>
@@ -825,6 +837,8 @@
     let selectedFile = null;
     let pickedFile = null; // 마지막으로 고른 파일 원본 (형식 토글 시 경고 재계산용)
     let lastTranscript = '';
+    let lastTimedTranscript = ''; // 시간정보가 붙은 자막 (쇼츠 구간 뽑기용, 없으면 빈 문자열)
+    let lastShortsSegments = []; // 롱폼에서 뽑은 쇼츠 추천 구간 목록
     let lastFrames = [];
     let lastSearchData = []; // 유튜브 자동완성에서 가져온 실제 검색어 (다시 생성 시 재사용)
     let originalGenerated = { titles: [], thumbs: [] }; // AI 원안 (수정 여부 비교용)
@@ -839,6 +853,15 @@
       document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
     });
     document.addEventListener('input', (e) => {
+      // 대본을 손으로 직접 고치면, 파일에서 읽어둔 시간정보는 더 이상 맞지 않으므로 버린다
+      if (e.target && e.target.id === 'script-input') {
+        if (lastTimedTranscript) {
+          lastTimedTranscript = '';
+          const hint = document.getElementById('srt-hint');
+          if (hint) hint.textContent = 'ⓘ 대본을 직접 수정함 — 시간정보 없이 처리 (시간대까지 원하면 자막 파일을 다시 불러오세요)';
+        }
+        return;
+      }
       const t = e.target.closest && e.target.closest('[contenteditable="true"]');
       if (!t || !t.id.startsWith('title-')) return;
       const i = Number(t.id.slice(6));
@@ -925,28 +948,93 @@
       document.getElementById('transcript-area').style.display = 'none';
     }
 
-    // ── SRT 파일 파싱 ────────────────────────────────────
-    function loadSRT(input) {
+    // ── 자막 파일 파싱 (srt / sbv / vtt / txt / csv) ──────
+    // 파일 형식은 달라도 핵심은 "안에 시간표시(몇 분 몇 초)가 있느냐"다.
+    // 있으면 시간표시 붙은 버전(timed)까지 만들어 쇼츠 구간 뽑기에 쓴다.
+    function parseSubtitle(raw, filename) {
+      const ext = (filename.split('.').pop() || '').toLowerCase();
+      const norm = raw.replace(/\r\n?/g, '\n').replace(/^﻿/, '');
+      const toSec = (h, m, s) => (+h || 0) * 3600 + (+m || 0) * 60 + (+s || 0);
+      const fmt = (sec) => {
+        sec = Math.floor(sec);
+        const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+        return (h > 0 ? h + ':' + String(m).padStart(2, '0') : String(m))
+          + ':' + String(s).padStart(2, '0');
+      };
+      const cues = []; // [시작초(또는 null), 텍스트]
+
+      if (ext === 'csv') {
+        // 표 형식: 각 줄에서 시간처럼 생긴 칸 + 나머지 글자 칸
+        const headerWord = /^(시간|시작|종료|start|end|time|자막|텍스트|text|내용|대사|caption|subtitle|번호|no)$/i;
+        norm.split('\n').forEach(line => {
+          if (!line.trim()) return;
+          const cells = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+          if (cells.some(c => headerWord.test(c))) return; // 머리글 행 건너뜀
+          let t = null; const texts = [];
+          cells.forEach(c => {
+            const mt = c.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?(?:[.,]\d+)?$/);
+            if (mt && t === null) {
+              t = mt[3] !== undefined ? toSec(mt[1], mt[2], mt[3]) : toSec(0, mt[1], mt[2]);
+            } else if (c) texts.push(c);
+          });
+          const text = texts.join(' ').trim();
+          if (text) cues.push([t, text]);
+        });
+      } else {
+        // srt / vtt / sbv / txt 공통: 줄 단위로 시간표시를 찾아가며 훑기
+        let pending = null;
+        norm.split('\n').forEach(line => {
+          const t = line.trim();
+          if (!t) return;
+          if (/^\d+$/.test(t)) return;               // srt 순번 줄
+          if (/^WEBVTT/i.test(t)) return;            // vtt 머리글
+          if (/^(NOTE|STYLE|REGION)\b/.test(t)) return;
+          let m;
+          // 화살표형 (srt/vtt): 00:03:20,000 --> ...  또는 03:20.000 --> ...
+          m = t.match(/^(?:(\d{1,2}):)?(\d{1,2}):(\d{1,2})[.,]\d+\s*-->/);
+          if (m) { pending = toSec(m[1] || 0, m[2], m[3]); return; }
+          // sbv형: 0:03:20.000,0:03:55.000
+          m = t.match(/^(?:(\d{1,2}):)?(\d{1,2}):(\d{1,2})[.,]\d+\s*,\s*\d/);
+          if (m) { pending = toSec(m[1] || 0, m[2], m[3]); return; }
+          // 줄머리 시간 + 텍스트 (유튜브 대본 txt): "3:20 텍스트"
+          m = t.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s+(\S.*)$/);
+          if (m) { const s = m[3] !== undefined ? toSec(m[1], m[2], m[3]) : toSec(0, m[1], m[2]); cues.push([s, m[4].trim()]); pending = null; return; }
+          // 줄에 시간만 있는 경우
+          m = t.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+          if (m) { pending = m[3] !== undefined ? toSec(m[1], m[2], m[3]) : toSec(0, m[1], m[2]); return; }
+          // 일반 텍스트 줄
+          cues.push([pending, t]);
+          pending = null;
+        });
+      }
+
+      const hasTime = cues.some(c => c[0] !== null && c[0] !== undefined);
+      const clean = cues.map(c => c[1]).join(' ').replace(/\s+/g, ' ').trim();
+      const timed = hasTime
+        ? cues.map(c => (c[0] !== null && c[0] !== undefined) ? `[${fmt(c[0])}] ${c[1]}` : c[1]).join('\n')
+        : '';
+      return { clean, timed, hasTime };
+    }
+
+    function loadSubtitle(input) {
       if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
       const reader = new FileReader();
       reader.onload = (e) => {
-        const raw = e.target.result;
-        // 순번, 타임스탬프 줄 제거하고 텍스트만 추출
-        const lines = raw.split('\n');
-        const text = lines
-          .filter(line => {
-            const t = line.trim();
-            return t.length > 0
-              && !/^\d+$/.test(t)
-              && !/\d{2}:\d{2}:\d{2}[,\.]\d{3}\s*-->/.test(t);
-          })
-          .join(' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-        document.getElementById('script-input').value = text;
+        const { clean, timed, hasTime } = parseSubtitle(e.target.result, file.name);
+        document.getElementById('script-input').value = clean;
+        lastTimedTranscript = timed; // 시간정보 없으면 ''
+        const hint = document.getElementById('srt-hint');
+        if (currentChannel === 'jeekim' && jeekimFormat === 'long') {
+          hint.textContent = hasTime
+            ? '✓ 시간정보 인식됨 — 쇼츠 구간을 시간대(예: 3:20~3:55)까지 뽑아드려요'
+            : 'ⓘ 시간정보 없음 — 쇼츠 구간을 시간대 없이 "어느 대목인지"로 짚어드려요';
+        } else {
+          hint.textContent = '✓ 자막을 불러왔어요';
+        }
         input.value = '';
       };
-      reader.readAsText(input.files[0], 'UTF-8');
+      reader.readAsText(file, 'UTF-8');
     }
 
     // ── 파일 선택 ────────────────────────────────────────
@@ -1551,6 +1639,13 @@ ${searchSection}
 - 고정 태그: #약국세무 #약사 반드시 포함
 - 총 10~15개 (15개 초과 시 유튜브가 전부 무시하므로 절대 초과 금지)
 
+【쇼츠 추천 구간 규칙 — 이 롱폼에서 잘라 쓸 쇼츠 후보 찾기】
+- 이 롱폼 안에서, 그 부분만 60초 이내로 잘라도 하나의 쇼츠로 완결되는 구간을 2~4개 고른다.
+- 좋은 쇼츠 구간의 조건: ① 숫자·금액·기간·불이익처럼 임팩트 있는 정보가 그 안에 다 들어있다 ② 앞뒤 맥락 없이도 이해된다 ③ "이것도?" 하는 의외성·후킹이 있다. 무난하고 밋밋한 대목은 고르지 말 것.
+- 각 구간마다 4가지를 채운다: 시간대 | 구간 주제 | 쇼츠용 제목안 | 왜 이 구간이 쇼츠감인지(한 줄)
+- 시간대: 아래에 【시간정보 있는 자막】이 주어지면 그 시간표시를 근거로 "MM:SS~MM:SS"로 적는다 (자막에 있는 시간만 사용, 지어내지 말 것). 자막이 주어지지 않았으면 시간대 대신 "(대목: 그 구간이 무슨 얘기인지 한 줄)"로 적는다.
+- 쇼츠용 제목안: 위 썸네일/제목 규칙과 같은 후킹 톤. 숫자·조건의 의미는 스크립트 원래 그대로.
+
 아래 영상 스크립트를 분석해서 다음 형식으로 정확히 출력해주세요:
 
 [핵심포인트] (1단계 추출 결과: 세부 주제 1줄 + 영상이 다룬 모든 사례·팁을 "-" 줄로 빠짐없이 나열, 최소 5개 이상. 대괄호 사용 금지)
@@ -1565,9 +1660,15 @@ ${searchSection}
 [썸네일3_아랫줄]
 [설명란] (해시태그 먼저 + 설명 텍스트, #약국세무 #약사 반드시 포함)
 [해시태그] (#약국세무 #약사 반드시 포함, 총 10~15개 공백으로 구분)
+[쇼츠구간1] 시간대 | 구간 주제 | 쇼츠용 제목안 | 왜 쇼츠감인지  (← 반드시 " | "로 네 칸을 구분)
+[쇼츠구간2] 〃
+[쇼츠구간3] 〃 (구간이 더 있으면 [쇼츠구간4]까지, 마땅치 않으면 2개만)
 
 스크립트:
-${transcript}`;
+${transcript}${lastTimedTranscript ? `
+
+【시간정보 있는 자막 — 쇼츠 구간의 시간대는 반드시 여기서 찾을 것】
+${lastTimedTranscript}` : ''}`;
       }
     }
 
@@ -1606,6 +1707,16 @@ ${transcript}`;
       const tagStr = get('해시태그');
       const tags = tagStr.split(/\s+/).filter(t => t.startsWith('#'));
       renderHashtags(tags);
+
+      // 쇼츠 추천 구간 (지킴 롱폼일 때만)
+      const showShorts = currentChannel === 'jeekim' && jeekimFormat === 'long';
+      lastShortsSegments = showShorts ? parseShortsSegments(raw) : [];
+      renderShortsSegments(lastShortsSegments);
+      document.getElementById('shorts-section').style.display =
+        (showShorts && lastShortsSegments.length) ? 'block' : 'none';
+      document.getElementById('shorts-hint').textContent = lastTimedTranscript
+        ? '— 자막 시간정보 기준, 시간대까지'
+        : '— 시간정보가 없어 "어느 대목"으로 (자막 파일 올리면 시간대까지)';
 
       document.getElementById('result-divider').style.display = 'block';
       document.getElementById('result-area').style.display = 'block';
@@ -1660,7 +1771,8 @@ ${transcript}`;
           title: '제목 3가지만 다시 생성해주세요. [제목1] [제목2] [제목3] 형식으로만 출력.',
           thumbnail: thumbnailInstruction,
           description: '설명란만 다시 생성해주세요. [설명란] 형식으로만 출력.',
-          hashtag: '해시태그만 다시 생성해주세요. [해시태그] 형식으로만 출력.'
+          hashtag: '해시태그만 다시 생성해주세요. [해시태그] 형식으로만 출력.',
+          shorts: '쇼츠 추천 구간만 다시 뽑아주세요. [쇼츠구간1] [쇼츠구간2] ... 형식으로만 출력 (각 줄은 "시간대 | 구간 주제 | 쇼츠용 제목안 | 왜 쇼츠감인지").'
         };
 
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -1734,6 +1846,11 @@ ${transcript}`;
             const tags = m[1].trim().split(/\s+/).filter(t => t.startsWith('#'));
             renderHashtags(tags);
           }
+        } else if (section === 'shorts') {
+          lastShortsSegments = parseShortsSegments(raw);
+          renderShortsSegments(lastShortsSegments);
+          document.getElementById('shorts-section').style.display =
+            lastShortsSegments.length ? 'block' : 'none';
         }
       } catch(e) {
         showError('다시 생성 실패: ' + e.message);
@@ -1805,6 +1922,10 @@ ${transcript}`;
         text = document.getElementById('result-description').textContent;
       } else if (section === 'hashtag') {
         text = Array.from(document.querySelectorAll('#result-hashtag .hashtag')).map(el => el.textContent).join(' ');
+      } else if (section === 'shorts') {
+        text = lastShortsSegments.map((s, i) =>
+          `${i + 1}. ${s.time}${s.time ? ' | ' : ''}${s.topic}\n   제목안: ${s.title}\n   이유: ${s.why}`
+        ).join('\n\n');
       }
 
       navigator.clipboard.writeText(text).then(() => {
@@ -1831,6 +1952,8 @@ ${transcript}`;
     function resetAll() {
       selectedFile = null;
       lastTranscript = '';
+      lastTimedTranscript = '';
+      lastShortsSegments = [];
       lastFrames = [];
 
       document.getElementById('file-input').value = '';
@@ -1839,6 +1962,8 @@ ${transcript}`;
       document.getElementById('script-input').value = '';
       document.getElementById('transcript-text').value = '';
       document.getElementById('transcript-area').style.display = 'none';
+      document.getElementById('shorts-section').style.display = 'none';
+      document.getElementById('srt-hint').textContent = '스크립트를 붙여넣거나, 자막 파일(.srt / .sbv / .vtt / .txt / .csv)을 불러오세요';
 
       document.getElementById('result-area').style.display = 'none';
       document.getElementById('result-divider').style.display = 'none';
@@ -1850,6 +1975,44 @@ ${transcript}`;
       hideError();
       switchTab('file');
       window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // ── 쇼츠 추천 구간 파싱/렌더링 ───────────────────────
+    function parseShortsSegments(raw) {
+      const out = [];
+      const re = /\[쇼츠구간\d+\]\s*([^\[]+)/gi;
+      let m;
+      while ((m = re.exec(raw)) !== null) {
+        const parts = m[1].split('|').map(s => s.trim()).filter(Boolean);
+        if (!parts.length) continue;
+        // 형식: 시간대 | 구간 주제 | 쇼츠용 제목안 | 이유
+        const [time = '', topic = '', title = '', why = ''] = parts;
+        // 안내용 자리표시(〃 등)는 건너뜀
+        if (/^[〃"']*$/.test((topic + title).replace(/\s/g, ''))) continue;
+        out.push({ time, topic, title, why });
+      }
+      return out;
+    }
+
+    function renderShortsSegments(segs) {
+      const box = document.getElementById('result-shorts');
+      box.innerHTML = '';
+      segs.forEach((s, i) => {
+        const item = document.createElement('div');
+        item.className = 'result-item';
+        const timeLabel = s.time ? `<span class="item-num" style="min-width:auto;padding:2px 8px;">${escapeHtml(s.time)}</span>` : '';
+        item.innerHTML =
+          `<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:4px;">`
+          + timeLabel
+          + `<strong style="color:#e0e0e0;font-size:14px;">${escapeHtml(s.topic)}</strong></div>`
+          + (s.title ? `<div class="result-text" style="margin-bottom:2px;">🎬 ${escapeHtml(s.title)}</div>` : '')
+          + (s.why ? `<div class="result-text" style="color:#999;font-size:13px;">↳ ${escapeHtml(s.why)}</div>` : '');
+        box.appendChild(item);
+      });
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
     // ── 해시태그 렌더링 ──────────────────────────────────
@@ -2031,7 +2194,16 @@ ${transcript}`;
         thumbBlock = `============================\n썸네일 제목\n============================\n${thumbs}\n\n`;
       }
 
-      const content = `[${ch}] 유튜브 메타데이터\n생성일: ${date}\n\n============================\n제목 후보\n============================\n${titles}\n\n${thumbBlock}============================\n설명란\n============================\n${desc}\n\n============================\n해시태그\n============================\n${tags}\n`;
+      // 쇼츠 추천 구간 (지킴 롱폼에서 뽑힌 경우에만)
+      let shortsBlock = '';
+      if (lastShortsSegments.length) {
+        const segs = lastShortsSegments.map((s, i) =>
+          `${i + 1}. ${s.time}${s.time ? ' | ' : ''}${s.topic}\n   제목안: ${s.title}\n   이유: ${s.why}`
+        ).join('\n\n');
+        shortsBlock = `============================\n쇼츠 추천 구간\n============================\n${segs}\n\n`;
+      }
+
+      const content = `[${ch}] 유튜브 메타데이터\n생성일: ${date}\n\n============================\n제목 후보\n============================\n${titles}\n\n${thumbBlock}============================\n설명란\n============================\n${desc}\n\n============================\n해시태그\n============================\n${tags}\n\n${shortsBlock}`;
 
       const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
