@@ -1193,8 +1193,13 @@
 
             for (let i = 0; i < count; i++) {
               const time = duration * (i + 1) / (count + 1);
-              await new Promise(res => {
-                video.addEventListener('seeked', res, { once: true });
+              await new Promise((res, rej) => {
+                const onSeeked = () => { clearTimeout(to); res(); };
+                const to = setTimeout(() => {
+                  video.removeEventListener('seeked', onSeeked);
+                  rej(new Error('영상 프레임을 읽는 데 너무 오래 걸려요. 다른 영상으로 시도하거나 자막을 직접 넣어주세요.'));
+                }, 8000);
+                video.addEventListener('seeked', onSeeked, { once: true });
                 video.currentTime = time;
               });
               ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -1318,7 +1323,14 @@
       }
 
       const data = await res.json();
-      const transcript = data.text;
+      const transcript = (data.text || '').trim();
+
+      // 변환은 성공했지만 내용이 빔(무음·말 없는 영상) → 조용히 통과하면 호출부에서 UI가 잠긴 채 굳음
+      if (!transcript) {
+        setUIGenerating(false);
+        showError('영상에서 말소리를 찾지 못했어요. 자막이 있는 영상이거나, 스크립트를 직접 붙여넣어 주세요.');
+        return null;
+      }
 
       setStep(1, 'done');
       lastTranscript = transcript;
@@ -1707,6 +1719,12 @@ ${lastTimedTranscript}` : ''}`;
         const m = raw.match(re);
         return m ? m[1].trim() : '';
       };
+
+      // AI가 대괄호 형식을 통째로 이탈하면 모든 항목이 빈칸 → 빈 결과창을 정상처럼 띄우지 말고 재시도 안내
+      if (!get('제목1') && !get('제목2') && !get('제목3') && !get('설명란')) {
+        showError('AI 응답 형식을 못 알아봤어요. "다시 생성하기"로 한 번 더 시도해주세요.');
+        return;
+      }
 
       const kp = get('핵심포인트');
       document.getElementById('keypoints-section').style.display = kp ? 'block' : 'none';
